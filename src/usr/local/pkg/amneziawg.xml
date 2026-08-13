@@ -31,16 +31,16 @@
 	<version>%%PKGVERSION%%</version>
 	<title>VPN/AmneziaWG</title>
 	<donotsave>true</donotsave>
-	<include_file>/usr/local/pkg/amneziawg/includes/wg.inc</include_file>
+	<include_file>/usr/local/pkg/amneziawg/includes/awg.inc</include_file>
 	<menu>
 		<name>AmneziaWG</name>
 		<section>VPN</section>
-		<url>/wg/vpn_aawg_tunnels.php</url>
+		<url>/awg/vpn_awg_tunnels.php</url>
 	</menu>
 	<menu>
 		<name>AmneziaWG</name>
 		<section>Status</section>
-		<url>/wg/status_amneziawg.php</url>
+		<url>/awg/status_amneziawg.php</url>
 	</menu>
 	<service>
 		<name>amneziawg</name>

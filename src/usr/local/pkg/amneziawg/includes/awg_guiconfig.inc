@@ -23,7 +23,7 @@
 require_once('util.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_globals.inc');
 
 function awg_print_service_warning($only_with_tunnels = true) {
@@ -327,7 +327,7 @@ function awg_generate_tunnel_address_popover_link($tunnel_name) {
 
 	if ([$tun_idx, $tunnel, $is_new] = awg_tunnel_get_config_by_name($tunnel_name, false)) {
 		if (!is_awg_tunnel_assigned($tunnel['name'])) {
-			return awg_compose_address_popover_link($tunnel['addresses']['row'], gettext('Interface Addresses'), "vpn_aawg_tunnels_edit.php?tun={$tunnel_name}");
+			return awg_compose_address_popover_link($tunnel['addresses']['row'], gettext('Interface Addresses'), "vpn_awg_tunnels_edit.php?tun={$tunnel_name}");
 		} else {
 			$awg_pfsense_if = awg_get_pfsense_interface_info($tunnel['name']);
 
@@ -350,7 +350,7 @@ function awg_generate_peer_allowedips_popup_link($peer_idx) {
 	$s = fn($x) => $x;
 
 	if ([$peer_idx, $peer, $is_new] = awg_peer_get_config($peer_idx, false)) {
-		return awg_compose_address_popover_link($peer['allowedips']['row'], gettext('Allowed IPs'), "vpn_aawg_peers_edit.php?peer={$peer_idx}");
+		return awg_compose_address_popover_link($peer['allowedips']['row'], gettext('Allowed IPs'), "vpn_awg_peers_edit.php?peer={$peer_idx}");
 	}
 
 	return null;

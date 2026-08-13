@@ -50,14 +50,27 @@ done
 #
 # El ORDEN importa: cada regla se aplica una sola vez y varias se solapan.
 # Las mas especificas van primero para que las genericas no se las coman.
+#
+# OJO con las reglas redundantes: sed aplica cada -e sobre el resultado de la
+# anterior, no sobre el texto original. Habia una regla 's/vpn_wg_/vpn_awg_/g'
+# antes de 's/wg_/awg_/g', y la segunda volvia a matchear el 'wg_' que vive
+# DENTRO del 'awg_' recien escrito, dejando 'vpn_aawg_' en ~130 lugares. Los
+# nombres de archivo salian bien (abajo el bloque de rename usa ^ anclado), asi
+# que el arbol parecia correcto y en realidad ningun link resolvia.
+# 's/wg_/awg_/g' sola ya convierte 'vpn_wg_' en 'vpn_awg_': no hace falta nada
+# mas especifico.
 # ---------------------------------------------------------------------------
 echo "  reescribiendo contenido..."
 
 find "$DEST" -type f -exec sed -i \
-	-e 's/vpn_wg_/vpn_awg_/g' \
 	-e 's/php_wg/php_awg/g' \
 	-e 's/\bWG_/AWG_/g' \
 	-e 's/wg_/awg_/g' \
+	-e 's|/wg/|/awg/|g' \
+	-e 's|"wg/|"awg/|g' \
+	-e "s|'wg/|'awg/|g" \
+	-e 's|/wg\.inc|/awg.inc|g' \
+	-e 's/wgRegTrim/awgRegTrim/g' \
 	-e 's/wgg/awgg/g' \
 	-e 's/wgconfig/awgconfig/g' \
 	-e "s/'wg'/'awg'/g" \
@@ -121,5 +134,9 @@ mark "${P}/awg_api.inc"     "crear interfaz = spawn de amneziawg-go"
 mark "${P}/awg_service.inc" "supervisor de N procesos go"
 
 echo
-echo "Listo. Verificar que no quedaron restos:"
-echo "  grep -rn 'wireguard\|WireGuard\|if_wg' $DEST"
+echo "Listo. Verificar que no quedaron restos. Este es el chequeo que importa:"
+echo "  grep -rnE '(^|[^aA])wg[a-zA-Z0-9_./]*' $DEST"
+echo
+echo "Busca cualquier 'wg' que no sea parte de 'awg' ni de 'AmneziaWG'. Lo unico"
+echo "que deberia aparecer son los comentarios que contrastan a proposito con el"
+echo "paquete de WireGuard. Un solo resto ahi es un link que no resuelve."

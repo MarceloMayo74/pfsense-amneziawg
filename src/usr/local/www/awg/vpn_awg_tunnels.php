@@ -1,6 +1,6 @@
 <?php
 /*
- * vpn_aawg_tunnels.php
+ * vpn_awg_tunnels.php
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
@@ -24,7 +24,7 @@
 ##|*IDENT=page-vpn-amneziawg
 ##|*NAME=VPN: AmneziaWG
 ##|*DESCR=Allow access to the 'VPN: AmneziaWG' page.
-##|*MATCH=vpn_aawg_tunnels.php*
+##|*MATCH=vpn_awg_tunnels.php*
 ##|-PRIV
 
 // pfSense includes
@@ -34,7 +34,7 @@ require_once('pfsense-utils.inc');
 require_once('service-utils.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 global $awgg;
@@ -78,7 +78,7 @@ if ($_POST) {
 		if ($tun_found) {
 			switch ($_POST['act']) {
 				case 'download':
-					awg_download_tunnel($tun_name, '/wg/vpn_aawg_tunnels.php');
+					awg_download_tunnel($tun_name, '/awg/vpn_awg_tunnels.php');
 					exit();
 					break;
 				case 'toggle':
@@ -89,7 +89,7 @@ if ($_POST) {
 					break;
 				default:
 					// Shouldn't be here, so bail out.
-					header('Location: /wg/vpn_aawg_tunnels.php');
+					header('Location: /awg/vpn_awg_tunnels.php');
 					break;
 			}
 			$input_errors = $res['input_errors'];
@@ -117,10 +117,10 @@ $pgtitle = array(gettext('VPN'), gettext('AmneziaWG'), gettext('Tunnels'));
 $pglinks = array('', '@self', '@self');
 
 $tab_array = array();
-$tab_array[] = array(gettext('Tunnels'), true, '/wg/vpn_aawg_tunnels.php');
-$tab_array[] = array(gettext('Peers'), false, '/wg/vpn_aawg_peers.php');
-$tab_array[] = array(gettext('Settings'), false, '/wg/vpn_aawg_settings.php');
-$tab_array[] = array(gettext('Status'), false, '/wg/status_amneziawg.php');
+$tab_array[] = array(gettext('Tunnels'), true, '/awg/vpn_awg_tunnels.php');
+$tab_array[] = array(gettext('Peers'), false, '/awg/vpn_awg_peers.php');
+$tab_array[] = array(gettext('Settings'), false, '/awg/vpn_awg_settings.php');
+$tab_array[] = array(gettext('Status'), false, '/awg/status_amneziawg.php');
 
 include('head.inc');
 
@@ -175,8 +175,8 @@ if (count(config_get_path('installedpackages/amneziawg/tunnels/item', [])) > 0):
 						<td><?=count($peers)?></td>
 
 						<td style="cursor: pointer;">
-							<a class="fa-solid fa-user-plus" title="<?=gettext('Add Peer')?>" href="<?="vpn_aawg_peers_edit.php?tun={$tunnel['name']}"?>"></a>
-							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Tunnel')?>" href="<?="vpn_aawg_tunnels_edit.php?tun={$tunnel['name']}"?>"></a>
+							<a class="fa-solid fa-user-plus" title="<?=gettext('Add Peer')?>" href="<?="vpn_awg_peers_edit.php?tun={$tunnel['name']}"?>"></a>
+							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Tunnel')?>" href="<?="vpn_awg_tunnels_edit.php?tun={$tunnel['name']}"?>"></a>
 							<a class="fa-solid fa-download" title="<?=gettext('Download Configuration')?>" href="<?="?act=download&tun={$tunnel['name']}"?>" usepost></a>
 							<?=awg_generate_toggle_icon_link(($tunnel['enabled'] == 'yes'), 'tunnel', "?act=toggle&tun={$tunnel['name']}")?>
 							<a class="fa-solid fa-trash-can text-danger" title="<?=gettext('Delete Tunnel')?>" href="<?="?act=delete&tun={$tunnel['name']}"?>" usepost></a>
@@ -238,7 +238,7 @@ endif;
 		</div>
 	</div>
 	<nav class="action-buttons">
-		<a href="vpn_aawg_tunnels_edit.php" class="btn btn-success btn-sm">
+		<a href="vpn_awg_tunnels_edit.php" class="btn btn-success btn-sm">
 			<i class="fa-solid fa-plus icon-embed-btn"></i>
 			<?=gettext('Add Tunnel')?>
 		</a>

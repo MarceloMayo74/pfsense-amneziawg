@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-function wgRegTrimHandler() {
+function awgRegTrimHandler() {
 	$('body').on('change', '.trim', function () {
 		$(this).val($(this).val().replace(/\s/g, ''));
 	});

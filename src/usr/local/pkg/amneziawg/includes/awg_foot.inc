@@ -20,4 +20,4 @@
  */
 ?>
 
-<script src="/wg/js/AmneziaWGHelpers.js?v=<?=filemtime('/usr/local/www/wg/js/AmneziaWGHelpers.js')?>"></script>
+<script src="/awg/js/AmneziaWGHelpers.js?v=<?=filemtime('/usr/local/www/awg/js/AmneziaWGHelpers.js')?>"></script>

@@ -1,6 +1,6 @@
 <?php
 /*
- * vpn_aawg_peers_edit.php
+ * vpn_awg_peers_edit.php
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
@@ -24,7 +24,7 @@
 ##|*IDENT=page-vpn-amneziawg
 ##|*NAME=VPN: AmneziaWG: Edit
 ##|*DESCR=Allow access to the 'VPN: AmneziaWG' page.
-##|*MATCH=vpn_aawg_peers_edit.php*
+##|*MATCH=vpn_awg_peers_edit.php*
 ##|-PRIV
 
 // pfSense includes
@@ -32,7 +32,7 @@ require_once('functions.inc');
 require_once('guiconfig.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 global $awgg;
@@ -51,7 +51,7 @@ if (isset($_REQUEST['peer']) && is_numericint($_REQUEST['peer'])) {
 	$peer_idx = $_REQUEST['peer'];
 }
 
-// All form save logic is in amneziawg/wg.inc
+// All form save logic is in amneziawg/awg.inc
 if ($_POST) {
 	switch ($_POST['act']) {
 		case 'save':
@@ -69,7 +69,7 @@ if ($_POST) {
 				}
 
 				// Save was successful
-				header('Location: /wg/vpn_aawg_peers.php');
+				header('Location: /awg/vpn_awg_peers.php');
 			}
 			
 			break;
@@ -82,7 +82,7 @@ if ($_POST) {
 
 		default:
 			// Shouldn't be here, so bail out.
-			header('Location: /wg/vpn_aawg_peers.php');
+			header('Location: /awg/vpn_awg_peers.php');
 			break;
 	}
 }
@@ -105,13 +105,13 @@ if (is_numericint($peer_idx) && is_array(config_get_path("installedpackages/amne
 $shortcut_section = "amneziawg";
 
 $pgtitle = array(gettext("VPN"), gettext("AmneziaWG"), gettext("Peers"), gettext("Edit"));
-$pglinks = array("", "/wg/vpn_aawg_tunnels.php", "/wg/vpn_aawg_peers.php", "@self");
+$pglinks = array("", "/awg/vpn_awg_tunnels.php", "/awg/vpn_awg_peers.php", "@self");
 
 $tab_array = array();
-$tab_array[] = array(gettext("Tunnels"), false, "/wg/vpn_aawg_tunnels.php");
-$tab_array[] = array(gettext("Peers"), true, "/wg/vpn_aawg_peers.php");
-$tab_array[] = array(gettext("Settings"), false, "/wg/vpn_aawg_settings.php");
-$tab_array[] = array(gettext("Status"), false, "/wg/status_amneziawg.php");
+$tab_array[] = array(gettext("Tunnels"), false, "/awg/vpn_awg_tunnels.php");
+$tab_array[] = array(gettext("Peers"), true, "/awg/vpn_awg_peers.php");
+$tab_array[] = array(gettext("Settings"), false, "/awg/vpn_awg_settings.php");
+$tab_array[] = array(gettext("Status"), false, "/awg/status_amneziawg.php");
 
 include("head.inc");
 
@@ -146,7 +146,7 @@ $section->addInput($input = new Form_Select(
 	'Tunnel',
 	$pconfig['tun'],
 	awg_get_tun_list()
-))->setHelp("AmneziaWG tunnel for this peer. (<a href='vpn_aawg_tunnels_edit.php'>Create a New Tunnel</a>)");
+))->setHelp("AmneziaWG tunnel for this peer. (<a href='vpn_awg_tunnels_edit.php'>Create a New Tunnel</a>)");
 
 $section->addInput(new Form_Input(
 	'descr',
@@ -324,7 +324,7 @@ events.push(function() {
 	// Supress "Delete" button if there are fewer than two rows
 	checkLastRow();
 
-	wgRegTrimHandler();
+	awgRegTrimHandler();
 
 	$('#copypsk').click(function () {
 		var $this = $(this);
@@ -350,7 +350,7 @@ events.push(function() {
 	$('#genpsk').click(function(event) {
 		if ($('#presharedkey').val().length == 0 || confirm(<?=json_encode($genkeywarning)?>)) {
 			ajaxRequest = $.ajax({
-				url: "/wg/vpn_aawg_peers_edit.php",
+				url: "/awg/vpn_awg_peers_edit.php",
 				type: "post",
 				data: {
 					act: "genpsk"

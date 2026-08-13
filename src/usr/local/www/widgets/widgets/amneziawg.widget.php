@@ -27,7 +27,7 @@ require_once('guiconfig.inc');
 require_once('util.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 // Widget includes

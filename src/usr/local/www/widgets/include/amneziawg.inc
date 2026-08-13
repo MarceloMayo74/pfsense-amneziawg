@@ -22,7 +22,7 @@
  */
 
 $amneziawg_title = gettext('AmneziaWG');
-$amneziawg_title_link = '/wg/status_amneziawg.php';
+$amneziawg_title_link = '/awg/status_amneziawg.php';
 
 function awg_do_widget_settings_post($post, $user_settings) {
 	global $awgg;
@@ -124,7 +124,7 @@ function awg_compose_widget_body($widgetkey, $amneziawg_activity_threshold) {
 					<tr>
 						<td>
 							{$s(awg_interface_status_icon($device['status']))}
-							<a href="wg/vpn_aawg_tunnels_edit.php?tun={$s(htmlspecialchars($device_name))}">{$s(htmlspecialchars($device_name))}</a>
+							<a href="awg/vpn_awg_tunnels_edit.php?tun={$s(htmlspecialchars($device_name))}">{$s(htmlspecialchars($device_name))}</a>
 						</td>
 						<td>{$s(htmlspecialchars(awg_truncate_pretty($device['config']['descr'], 16)))}</td>
 						<td>{$s(htmlspecialchars(count($active_peers)))}</td>

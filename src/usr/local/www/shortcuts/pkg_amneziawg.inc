@@ -24,8 +24,8 @@
 global $shortcuts;
 
 $shortcuts['amneziawg'] = array();
-$shortcuts['amneziawg']['main'] = '/wg/vpn_aawg_settings.php';
-$shortcuts['amneziawg']['status'] = '/wg/status_amneziawg.php';
+$shortcuts['amneziawg']['main'] = '/awg/vpn_awg_settings.php';
+$shortcuts['amneziawg']['status'] = '/awg/status_amneziawg.php';
 $shortcuts['amneziawg']['service'] = 'amneziawg';
 
 ?>

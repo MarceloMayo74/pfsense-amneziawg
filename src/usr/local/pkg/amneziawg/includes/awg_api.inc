@@ -42,7 +42,7 @@ function awg_get_status($json = false) {
 }
 
 /*
-* Returns a massive associative array of current wg status
+* Returns a massive associative array of current awg status
 * 
 * $extras returns additional info not provided by `awg show all dump`
 */
@@ -884,7 +884,7 @@ function next_awg_if() {
 	return false;
 }
 
-// Check if wg tunnel is assigned to an interface
+// Check if awg tunnel is assigned to an interface
 function is_awg_tunnel_assigned($tunnel_name, $disabled = true) {
 	$if_list = get_configured_interface_list_by_realif($disabled);
 

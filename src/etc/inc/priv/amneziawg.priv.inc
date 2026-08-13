@@ -27,17 +27,17 @@ $priv_list['page-vpn-amneziawg']['name'] = "WebCfg - VPN: AmneziaWG";
 $priv_list['page-vpn-amneziawg']['descr'] = "Allow access to the 'VPN: AmneziaWG' page.";
 $priv_list['page-vpn-amneziawg']['match'] = array();
 
-$priv_list['page-vpn-amneziawg']['match'][] = "wg/vpn_aawg_tunnels.php*";
-$priv_list['page-vpn-amneziawg']['match'][] = "wg/vpn_aawg_tunnels_edit.php*";
-$priv_list['page-vpn-amneziawg']['match'][] = "wg/vpn_aawg_peers.php*";
-$priv_list['page-vpn-amneziawg']['match'][] = "wg/vpn_aawg_peers_edit.php*";
-$priv_list['page-vpn-amneziawg']['match'][] = "wg/vpn_aawg_settings.php";
+$priv_list['page-vpn-amneziawg']['match'][] = "awg/vpn_awg_tunnels.php*";
+$priv_list['page-vpn-amneziawg']['match'][] = "awg/vpn_awg_tunnels_edit.php*";
+$priv_list['page-vpn-amneziawg']['match'][] = "awg/vpn_awg_peers.php*";
+$priv_list['page-vpn-amneziawg']['match'][] = "awg/vpn_awg_peers_edit.php*";
+$priv_list['page-vpn-amneziawg']['match'][] = "awg/vpn_awg_settings.php";
 
 $priv_list['page-status-amneziawg'] = array();
 $priv_list['page-status-amneziawg']['name'] = "WebCfg - Status: AmneziaWG Status";
 $priv_list['page-status-amneziawg']['descr'] = "Allow access to the 'Status: AmneziaWG Status' page.";
 $priv_list['page-status-amneziawg']['match'] = array();
 
-$priv_list['page-status-amneziawg']['match'][] = "wg/status_amneziawg.php";
+$priv_list['page-status-amneziawg']['match'][] = "awg/status_amneziawg.php";
 
 ?>

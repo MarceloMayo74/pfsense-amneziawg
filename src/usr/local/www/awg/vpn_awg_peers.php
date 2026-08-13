@@ -1,6 +1,6 @@
 <?php
 /*
- * vpn_aawg_peers.php
+ * vpn_awg_peers.php
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
@@ -24,7 +24,7 @@
 ##|*IDENT=page-vpn-amneziawg
 ##|*NAME=VPN: AmneziaWG
 ##|*DESCR=Allow access to the 'VPN: AmneziaWG' page.
-##|*MATCH=vpn_aawg_peers.php*
+##|*MATCH=vpn_awg_peers.php*
 ##|-PRIV
 
 // pfSense includes
@@ -32,7 +32,7 @@ require_once('functions.inc');
 require_once('guiconfig.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 global $awgg;
@@ -71,7 +71,7 @@ if ($_POST) {
 
 			default:
 				// Shouldn't be here, so bail out.
-				header('Location: /wg/vpn_aawg_peers.php');
+				header('Location: /awg/vpn_awg_peers.php');
 				break;
 		}
 
@@ -91,13 +91,13 @@ if ($_POST) {
 $shortcut_section = 'amneziawg';
 
 $pgtitle = array(gettext('VPN'), gettext('AmneziaWG'), gettext('Peers'));
-$pglinks = array('', '/wg/vpn_aawg_tunnels.php', '@self');
+$pglinks = array('', '/awg/vpn_awg_tunnels.php', '@self');
 
 $tab_array = array();
-$tab_array[] = array(gettext('Tunnels'), false, '/wg/vpn_aawg_tunnels.php');
-$tab_array[] = array(gettext('Peers'), true, '/wg/vpn_aawg_peers.php');
-$tab_array[] = array(gettext('Settings'), false, '/wg/vpn_aawg_settings.php');
-$tab_array[] = array(gettext('Status'), false, '/wg/status_amneziawg.php');
+$tab_array[] = array(gettext('Tunnels'), false, '/awg/vpn_awg_tunnels.php');
+$tab_array[] = array(gettext('Peers'), true, '/awg/vpn_awg_peers.php');
+$tab_array[] = array(gettext('Settings'), false, '/awg/vpn_awg_settings.php');
+$tab_array[] = array(gettext('Status'), false, '/awg/status_amneziawg.php');
 
 include('head.inc');
 
@@ -142,7 +142,7 @@ if (count(config_get_path('installedpackages/amneziawg/peers/item', [])) > 0):
 
 		foreach (config_get_path('installedpackages/amneziawg/peers/item', []) as $peer_idx => $peer):
 ?>
-					<tr ondblclick="document.location='<?="vpn_aawg_peers_edit.php?peer={$peer_idx}"?>';" class="<?=awg_peer_status_class($peer)?>">
+					<tr ondblclick="document.location='<?="vpn_awg_peers_edit.php?peer={$peer_idx}"?>';" class="<?=awg_peer_status_class($peer)?>">
 						<td><?=htmlspecialchars(awg_truncate_pretty($peer['descr'], 16))?></td>
 						<td style="cursor: pointer;" class="pubkey" title="<?=htmlspecialchars($peer['publickey'])?>">
 							<?=htmlspecialchars(awg_truncate_pretty($peer['publickey'], 16))?>
@@ -151,7 +151,7 @@ if (count(config_get_path('installedpackages/amneziawg/peers/item', [])) > 0):
 						<td><?=awg_generate_peer_allowedips_popup_link($peer_idx)?></td>
 						<td><?=htmlspecialchars(awg_format_endpoint(false, $peer))?></td>
 						<td style="cursor: pointer;">
-							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Peer')?>" href="<?="vpn_aawg_peers_edit.php?peer={$peer_idx}"?>"></a>
+							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Peer')?>" href="<?="vpn_awg_peers_edit.php?peer={$peer_idx}"?>"></a>
 							<?=awg_generate_toggle_icon_link(($peer['enabled'] == 'yes'), 'peer', "?act=toggle&peer={$peer_idx}")?>
 							<a class="fa-solid fa-trash-can text-danger" title="<?=gettext('Delete Peer')?>" href="<?="?act=delete&peer={$peer_idx}"?>" usepost></a>
 						</td>
@@ -175,7 +175,7 @@ endif;
 		</div>
 	</div>
 	<nav class="action-buttons">
-		<a href="vpn_aawg_peers_edit.php" class="btn btn-success btn-sm">
+		<a href="vpn_awg_peers_edit.php" class="btn btn-success btn-sm">
 			<i class="fa-solid fa-plus icon-embed-btn"></i>
 			<?=gettext('Add Peer')?>
 		</a>

@@ -1,6 +1,6 @@
 <?php
 /*
- * wg.inc
+ * awg.inc
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
@@ -806,7 +806,7 @@ function awg_create_config_files($clean = true) {
 }
 
 /* 
- * Remove all wg .conf files from any potential configuration directory
+ * Remove all awg .conf files from any potential configuration directory
  */
 function awg_delete_config_files() {
 	global $awgg;

@@ -35,7 +35,7 @@ require_once('services.inc');
 require_once('service-utils.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 
 global $awgg;
 

@@ -1,6 +1,6 @@
 <?php
 /*
- * vpn_aawg_settings.php
+ * vpn_awg_settings.php
  *
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
@@ -24,7 +24,7 @@
 ##|*IDENT=page-vpn-amneziawg
 ##|*NAME=VPN: AmneziaWG: Settings
 ##|*DESCR=Allow access to the 'VPN: AmneziaWG' page.
-##|*MATCH=vpn_aawg_settings.php*
+##|*MATCH=vpn_awg_settings.php*
 ##|-PRIV
 
 // pfSense includes
@@ -32,7 +32,7 @@ require_once('functions.inc');
 require_once('guiconfig.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 global $awgg;
@@ -76,7 +76,7 @@ if ($_POST) {
 
 			default:
 				// Shouldn't be here, so bail out.
-				header('Location: /wg/vpn_aawg_settings.php');
+				header('Location: /awg/vpn_awg_settings.php');
 				break;
 		}
 	}
@@ -94,13 +94,13 @@ $pconfig = config_get_path('installedpackages/amneziawg/config/0');
 $shortcut_section = 'amneziawg';
 
 $pgtitle = array(gettext('VPN'), gettext('AmneziaWG'), gettext('Settings'));
-$pglinks = array('', '/wg/vpn_aawg_tunnels.php', '@self');
+$pglinks = array('', '/awg/vpn_awg_tunnels.php', '@self');
 
 $tab_array = array();
-$tab_array[] = array(gettext('Tunnels'), false, '/wg/vpn_aawg_tunnels.php');
-$tab_array[] = array(gettext('Peers'), false, '/wg/vpn_aawg_peers.php');
-$tab_array[] = array(gettext('Settings'), true, '/wg/vpn_aawg_settings.php');
-$tab_array[] = array(gettext('Status'), false, '/wg/status_amneziawg.php');
+$tab_array[] = array(gettext('Tunnels'), false, '/awg/vpn_awg_tunnels.php');
+$tab_array[] = array(gettext('Peers'), false, '/awg/vpn_awg_peers.php');
+$tab_array[] = array(gettext('Settings'), true, '/awg/vpn_awg_settings.php');
+$tab_array[] = array(gettext('Status'), false, '/awg/status_amneziawg.php');
 
 include('head.inc');
 
@@ -233,7 +233,7 @@ print($form);
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
-	wgRegTrimHandler();
+	awgRegTrimHandler();
 
 	// Save the form
 	$('#saveform').click(function () {

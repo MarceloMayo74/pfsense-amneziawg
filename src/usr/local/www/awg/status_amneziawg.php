@@ -33,7 +33,7 @@ require_once('guiconfig.inc');
 require_once('util.inc');
 
 // AmneziaWG includes
-require_once('amneziawg/includes/wg.inc');
+require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 
 global $awgg;
@@ -65,10 +65,10 @@ $pgtitle = array(gettext("Status"), gettext("AmneziaWG"));
 $pglinks = array("", "@self");
 
 $tab_array = array();
-$tab_array[] = array(gettext("Tunnels"), false, "/wg/vpn_aawg_tunnels.php");
-$tab_array[] = array(gettext("Peers"), false, "/wg/vpn_aawg_peers.php");
-$tab_array[] = array(gettext("Settings"), false, "/wg/vpn_aawg_settings.php");
-$tab_array[] = array(gettext("Status"), true, "/wg/status_amneziawg.php");
+$tab_array[] = array(gettext("Tunnels"), false, "/awg/vpn_awg_tunnels.php");
+$tab_array[] = array(gettext("Peers"), false, "/awg/vpn_awg_peers.php");
+$tab_array[] = array(gettext("Settings"), false, "/awg/vpn_awg_settings.php");
+$tab_array[] = array(gettext("Status"), true, "/awg/status_amneziawg.php");
 
 include("head.inc");
 
@@ -116,7 +116,7 @@ if (!empty($a_devices)):
 				<tr class="<?="treegrid-{$device_name}"?>">
 					<td>
 						<?=awg_interface_status_icon($device['status'])?>
-						<a href="vpn_aawg_tunnels_edit.php?tun=<?=htmlspecialchars($device_name)?>"><?=htmlspecialchars($device_name)?></a>
+						<a href="vpn_awg_tunnels_edit.php?tun=<?=htmlspecialchars($device_name)?>"><?=htmlspecialchars($device_name)?></a>
 					</td>
 					<td><?=htmlspecialchars(awg_truncate_pretty($device['config']['descr'], 16))?></td>
 					<td><?=count($device['peers'])?></td>
