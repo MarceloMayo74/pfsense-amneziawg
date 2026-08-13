@@ -8,9 +8,9 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: fase 3 terminada.** El paquete instala, aparece en el menú y ya
-> tiene los 16 campos de ofuscación, validados y serializados al `.conf`.
-> Todavía no se pueden levantar túneles desde la GUI: falta la fase 4.
+> **Estado: fase 4 terminada.** El paquete instala, tiene los 16 campos de
+> ofuscación, y ya levanta y baja túneles desde la GUI supervisando un proceso
+> `amneziawg-go` por túnel.
 
 ## Estado por fase
 
@@ -19,8 +19,8 @@ firma.
 | 1 | Data plane a mano | ✅ validada en 2.9.0-BETA el 13-08-2026 |
 | 2 | Esqueleto del paquete | ✅ instalado y verificado en 2.9.0-BETA el 13-08-2026 |
 | 3 | Los 16 campos de ofuscación | ✅ verificados de punta a punta el 13-08-2026 |
-| 4 | Supervisión de los procesos | ⬜ el que sigue |
-| 5 | Watchdog | — |
+| 4 | Supervisión de los procesos | ✅ 6 propiedades verificadas el 13-08-2026 |
+| 5 | Watchdog | ⬜ el que sigue |
 | 6 | Integración con wgeasy | — |
 
 Lo verificado en la fase 2, sobre el firewall: `pkg add` corre `awg_install()`
@@ -47,15 +47,25 @@ como número, los headers salen sorteados y distintos en cada túnel nuevo, y la
 validación rechaza headers solapados, valores por debajo de 5, `Jmin > Jmax` y
 los fuera de rango. Hay 38 tests de la validación en `tools/test-obfuscation.php`.
 
+De la fase 4, seis propiedades medidas sobre el firewall con el mismo harness
+antes y después: cada túnel habilitado tiene su proceso, uno deshabilitado no
+tiene ninguno, sincronizar un túnel no toca a los otros, un túnel caído vuelve
+con un sync, y parar el servicio no deja ni procesos ni interfaces. Por el rc
+script —que es lo que corre el earlyshellcmd al boot— `start`, `restart` y
+`stop` dan 2/2/1, 2/2/1 y 0/0/0 procesos, interfaces y daemon.
+
+La fase 4 encontró que un hallazgo de la fase 1 valía a medias: matar el
+proceso destruye la interfaz **solo con `SIGTERM`**. Con `SIGKILL` quedan
+colgados el socket y la interfaz, así que un túnel caído parecía estar vivo.
+Está en `docs/arquitectura.md`, sección 11.
+
 ### Próximo paso concreto
 
-**Fase 4: supervisión de los procesos.** `awg_service.inc` tiene que ser un
-supervisor de N procesos `amneziawg-go`: arranque al boot, parada ordenada, y
-reinicio de un túnel sin tocar los otros. Es lo que falta para poder levantar
-un túnel desde la GUI.
-
-Acordarse de lo que dejó la fase 1: matar el proceso destruye la interfaz solo,
-no hace falta `ifconfig destroy`.
+**Fase 5: watchdog.** Detectar un túnel caído y relevantarlo por cron, sin
+esperar a que alguien toque Apply. La fase 4 dejó lo necesario para eso:
+`awg_proc_pid()` dice si un túnel está vivo de verdad y `awg_tunnel_sync_by_name()`
+lo revive sin tocar los demás. Ni el paquete oficial de WireGuard ni el de
+referencia tienen watchdog; el plugin de OPNsense sí.
 
 ## Por dónde empezar
 

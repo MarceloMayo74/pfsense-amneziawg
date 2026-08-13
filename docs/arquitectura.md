@@ -378,6 +378,20 @@ las referencias tiene y la que hace usable el modo servidor.
   interfaz `tun` sola; no hace falta `ifconfig destroy`. Simplifica el
   supervisor de la fase 4.
 
+  **Corregido en la fase 4: eso vale solo para `SIGTERM`.** Medido con un
+  experimento controlado sobre el firewall:
+
+  | señal | proceso | socket UAPI | interfaz |
+  |---|---|---|---|
+  | `SIGTERM` | se va | se va | se va |
+  | `SIGKILL` | se va | **queda** | **queda** |
+
+  `amneziawg-go` limpia lo suyo únicamente si lo dejan. Un proceso que se cae
+  —que es justo el caso que un supervisor existe para atender— deja el socket
+  y la interfaz colgados. De ahí que el estado "corriendo" no se pueda deducir
+  de que exista el socket, y que bajar un túnel tenga que limpiar siempre en
+  vez de confiar en que el proceso lo hizo.
+
 ---
 
 ## Referencias
