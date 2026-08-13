@@ -1,10 +1,4 @@
 <?php
-/* TODO FASE 4 - supervision
- * Ya no queda nada del modelo de kernel, pero este daemon sigue haciendo solo
- * lo que hacia en WireGuard: reresolver los endpoints por DNS. Le falta
- * supervisar los procesos amneziawg-go -- arranque al boot, parada ordenada y
- * reinicio de un tunel sin tocar los otros. Ver docs/arquitectura.md, fase 4.
- */
 /*
  * awg_service.inc
  *

@@ -230,8 +230,22 @@ function awg_destroy_tunnels(&$cmds = null) {
 	// Assume this will be successful...
 	$res = true;
 
+	/*
+	 * La union de tres fuentes, porque ninguna sola alcanza. awg(8) no lista un
+	 * tunel cuyo proceso se cayo. La configuracion no conoce los que quedaron
+	 * de antes de un cambio. Y las interfaces del sistema no incluyen a los que
+	 * ya perdieron la suya pero dejaron el socket colgado.
+	 *
+	 * Barrer de menos aca es lo que dejaba interfaces huerfanas ocupando un
+	 * nombre del rango despues de que un tunel se cayera.
+	 */
+	$tunnels = array_unique(array_merge(
+			awg_get_running_ifs(),
+			awg_get_configured_ifs(),
+			awg_get_system_ifs()));
+
 	// Tear down interfaces
-	foreach (awg_get_running_ifs() as $tunnel) {
+	foreach ($tunnels as $tunnel) {
 		$res &= awg_if_destroy($tunnel, $cmds);
 	}
 

@@ -585,7 +585,12 @@ function awg_destroy_rogue_tunnels(&$cmds = null) {
 	// Assume this will be successful
 	$res = true;
 
-	$running_ifs = awg_get_running_ifs();
+	/*
+	 * Una interfaz del rango que no responde a ninguna configuracion tambien es
+	 * rogue, aunque awg(8) no la liste: es lo que queda cuando un proceso se cae
+	 * o cuando se borra un tunel que estaba corriendo.
+	 */
+	$running_ifs = array_unique(array_merge(awg_get_running_ifs(), awg_get_system_ifs()));
 
 	$config_ifs = awg_get_configured_ifs();
 
@@ -677,8 +682,18 @@ function awg_tunnel_sync_by_name($tunnel_name, $json = false) {
 		// Determine desired state of the tunnel
 		$state = (isset($tunnel['enabled']) && $tunnel['enabled'] == 'yes');
 
-		// Create the tunnel interface if it does not yet exist
-		if (awg_if_create($tunnel['name'], $cmds)) {
+		if (!$state) {
+			/*
+			 * Deshabilitado tiene que ser sin proceso.
+			 *
+			 * Con el modulo de kernel alcanzaba con marcar la interfaz down:
+			 * crearla era clonar un cloner y no costaba nada. Aca cada tunel es
+			 * un proceso, asi que dejarlo corriendo con la interfaz abajo es
+			 * dejar prendido justo lo que el usuario apago -- con su puerto
+			 * tomado y su socket publicado.
+			 */
+			awg_if_destroy($tunnel['name'], $cmds);
+		} elseif (awg_if_create($tunnel['name'], $cmds)) {
 			// Add the tunnel interface to the AmneziaWG interface group
 			awg_interface_update_groups($tunnel['name'], $cmds);
 
