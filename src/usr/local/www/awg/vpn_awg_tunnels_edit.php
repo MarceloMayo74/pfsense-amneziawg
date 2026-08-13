@@ -433,7 +433,20 @@ $group->add(new Form_Input(
 
 $section->add($group);
 
-// Relleno de los paquetes del handshake
+/*
+ * Relleno de los paquetes del handshake.
+ *
+ * Los anchos van explicitos y suman <= Form::MAX_INPUT_WIDTH, que es 10 y no
+ * 12: la etiqueta del grupo se come las otras dos columnas. Cuatro campos de
+ * ancho 3 suman 12, y el cuarto se caia a una linea nueva sin la sangria de la
+ * etiqueta, pegado al margen izquierdo.
+ *
+ * Dejar que Form_Group reparta solo tampoco sirve acá: hace
+ * $spaceLeft / count($inputs), que con cuatro campos da col-sm-2.5, una clase
+ * que no existe en el grid.
+ */
+$pad_width = $awg2 ? 2 : 3;
+
 $group = new Form_Group('Handshake Padding');
 
 $group->add(new Form_Input(
@@ -442,8 +455,8 @@ $group->add(new Form_Input(
 	'number',
 	$pconfig['s1'],
 	['min' => 0, 'max' => 1280, 'placeholder' => $awgg['default_s1']]
-))->setHelp('S1 — bytes of padding added to the init packet. (0-1280)')
-  ->setWidth(3);
+))->setHelp('S1 — init packet')
+  ->setWidth($pad_width);
 
 $group->add(new Form_Input(
 	's2',
@@ -451,8 +464,8 @@ $group->add(new Form_Input(
 	'number',
 	$pconfig['s2'],
 	['min' => 0, 'max' => 1280, 'placeholder' => $awgg['default_s2']]
-))->setHelp('S2 — bytes of padding added to the response packet. (0-1280)')
-  ->setWidth(3);
+))->setHelp('S2 — response')
+  ->setWidth($pad_width);
 
 if ($awg2) {
 	$group->add(new Form_Input(
@@ -461,8 +474,8 @@ if ($awg2) {
 		'number',
 		$pconfig['s3'],
 		['min' => 0, 'max' => 1280]
-	))->setHelp('S3 — padding for the cookie reply. (0-1280)')
-	  ->setWidth(3);
+	))->setHelp('S3 — cookie reply')
+	  ->setWidth($pad_width);
 
 	$group->add(new Form_Input(
 		's4',
@@ -470,11 +483,16 @@ if ($awg2) {
 		'number',
 		$pconfig['s4'],
 		['min' => 0, 'max' => 1280]
-	))->setHelp('S4 — padding for transport packets. (0-1280)')
-	  ->setWidth(3);
+	))->setHelp('S4 — transport')
+	  ->setWidth($pad_width);
 }
 
 $section->add($group);
+
+$section->addInput(new Form_StaticText(
+	'',
+	"<span class='text-muted'>{$s(gettext('Bytes of padding added to each handshake packet, 0 to 1280.'))}</span>"
+));
 
 /*
  * H1-H4 son TEXTO, no enteros: admiten un valor suelto o un rango con guion
@@ -483,22 +501,22 @@ $section->add($group);
  */
 $group = new Form_Group('Magic Headers');
 
-foreach (array('h1' => 'init', 'h2' => 'response', 'h3' => 'cookie reply', 'h4' => 'transport') as $header => $what) {
+foreach (array('h1' => 'init packet', 'h2' => 'response', 'h3' => 'cookie reply', 'h4' => 'transport') as $header => $what) {
 	$group->add(new Form_Input(
 		$header,
 		strtoupper($header),
 		'text',
 		$pconfig[$header]
 	))->addClass('trim')
-	  ->setHelp(sprintf('%1$s — message type for the %2$s packet.', strtoupper($header), $what))
-	  ->setWidth(3);
+	  ->setHelp(sprintf('%1$s — %2$s', strtoupper($header), $what))
+	  ->setWidth(2);
 }
 
 $section->add($group);
 
 $section->addInput(new Form_StaticText(
 	'',
-	"<span class='text-muted'>{$s(gettext('A header is a single number or a hyphenated range, such as 787134324 or 787134324-1593815189. Values must be 5 or greater and the four must not overlap: 1 through 4 are the standard WireGuard message types, which any header left empty keeps using. New tunnels get random headers, because a fixed value would itself be a signature.'))}</span>"
+	"<span class='text-muted'>{$s(gettext('Each of these replaces the message type number of one kind of packet, and is either a single number or a hyphenated range such as 787134324-1593815189. Values must be 5 or greater and the four must not overlap: 1 through 4 are the standard WireGuard message types, which any header left empty keeps using. New tunnels get random headers, because a fixed value would itself be a signature.'))}</span>"
 ));
 
 /*
