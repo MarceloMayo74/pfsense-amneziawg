@@ -152,6 +152,25 @@ if (is_numericint($tun_idx) && is_array(config_get_path("installedpackages/amnez
 	// Default to enabled
 	$pconfig['enabled'] = 'yes';
 	$pconfig['name'] = next_awg_if();
+
+	/*
+	 * Ofuscacion por defecto, solo al abrir el formulario vacio. En un POST
+	 * que no valido, $pconfig ya trae lo que el usuario escribio y pisarlo le
+	 * borraria el trabajo justo cuando tiene que corregirlo.
+	 *
+	 * Los junk packets y el relleno arrancan con los valores de referencia.
+	 * H1-H4 se sortean en vez de tener un default fijo: un header constante
+	 * seria una firma nueva, que es lo que este paquete existe para no dejar.
+	 */
+	if (!$_POST) {
+		$pconfig['jc'] = $awgg['default_jc'];
+		$pconfig['jmin'] = $awgg['default_jmin'];
+		$pconfig['jmax'] = $awgg['default_jmax'];
+		$pconfig['s1'] = $awgg['default_s1'];
+		$pconfig['s2'] = $awgg['default_s2'];
+
+		$pconfig = array_merge($pconfig, awg_gen_headers());
+	}
 }
 
 // Save the MTU settings prior to re(saving)
@@ -363,6 +382,171 @@ if (!is_awg_tunnel_assigned($pconfig['name'])) {
 }
 
 $form->add($section);
+
+/*
+ * Ofuscacion.
+ *
+ * Los 16 parametros que separan AmneziaWG de WireGuard. La criptografia es la
+ * misma; esto cambia la forma de los paquetes para que un DPI no reconozca el
+ * handshake por su firma.
+ */
+$section = new Form_Section('Obfuscation');
+
+$awg2 = awg_backend_supports_awg2();
+
+$section->addInput(new Form_StaticText(
+	'Backend',
+	$awg2
+	    ? "<i class='fa-solid fa-circle-check' style='vertical-align: middle;'></i><span style='padding-left: 3px'>{$s(gettext('AmneziaWG 2.0. Every parameter below is supported.'))}</span>"
+	    : "<i class='fa-solid fa-triangle-exclamation' style='vertical-align: middle;'></i><span style='padding-left: 3px'>{$s(gettext('AmneziaWG 1.x. S3, S4 and I1-I5 are not supported and are left out of the tunnel configuration, but any value already stored is kept.'))}</span>"
+))->setHelp('Both ends of a tunnel must use the <b>same</b> obfuscation parameters. If they differ, the handshake never completes.');
+
+// Paquetes basura antes del handshake
+$group = new Form_Group('Junk Packets');
+
+$group->add(new Form_Input(
+	'jc',
+	'Jc',
+	'number',
+	$pconfig['jc'],
+	['min' => 1, 'max' => 128, 'placeholder' => $awgg['default_jc']]
+))->setHelp('Jc — how many junk packets to send before the handshake. (1-128)')
+  ->setWidth(3);
+
+$group->add(new Form_Input(
+	'jmin',
+	'Jmin',
+	'number',
+	$pconfig['jmin'],
+	['min' => 1, 'max' => 1280, 'placeholder' => $awgg['default_jmin']]
+))->setHelp('Jmin — smallest junk packet, in bytes. (1-1280)')
+  ->setWidth(3);
+
+$group->add(new Form_Input(
+	'jmax',
+	'Jmax',
+	'number',
+	$pconfig['jmax'],
+	['min' => 1, 'max' => 1280, 'placeholder' => $awgg['default_jmax']]
+))->setHelp('Jmax — largest junk packet, in bytes. Must not be smaller than Jmin. (1-1280)')
+  ->setWidth(3);
+
+$section->add($group);
+
+// Relleno de los paquetes del handshake
+$group = new Form_Group('Handshake Padding');
+
+$group->add(new Form_Input(
+	's1',
+	'S1',
+	'number',
+	$pconfig['s1'],
+	['min' => 0, 'max' => 1280, 'placeholder' => $awgg['default_s1']]
+))->setHelp('S1 — bytes of padding added to the init packet. (0-1280)')
+  ->setWidth(3);
+
+$group->add(new Form_Input(
+	's2',
+	'S2',
+	'number',
+	$pconfig['s2'],
+	['min' => 0, 'max' => 1280, 'placeholder' => $awgg['default_s2']]
+))->setHelp('S2 — bytes of padding added to the response packet. (0-1280)')
+  ->setWidth(3);
+
+if ($awg2) {
+	$group->add(new Form_Input(
+		's3',
+		'S3',
+		'number',
+		$pconfig['s3'],
+		['min' => 0, 'max' => 1280]
+	))->setHelp('S3 — padding for the cookie reply. (0-1280)')
+	  ->setWidth(3);
+
+	$group->add(new Form_Input(
+		's4',
+		'S4',
+		'number',
+		$pconfig['s4'],
+		['min' => 0, 'max' => 1280]
+	))->setHelp('S4 — padding for transport packets. (0-1280)')
+	  ->setWidth(3);
+}
+
+$section->add($group);
+
+/*
+ * H1-H4 son TEXTO, no enteros: admiten un valor suelto o un rango con guion
+ * (787134324-1593815189). Un Form_Input numerico los rompe en silencio contra
+ * configuraciones reales. Ver docs/arquitectura.md, seccion 7.
+ */
+$group = new Form_Group('Magic Headers');
+
+foreach (array('h1' => 'init', 'h2' => 'response', 'h3' => 'cookie reply', 'h4' => 'transport') as $header => $what) {
+	$group->add(new Form_Input(
+		$header,
+		strtoupper($header),
+		'text',
+		$pconfig[$header]
+	))->addClass('trim')
+	  ->setHelp(sprintf('%1$s — message type for the %2$s packet.', strtoupper($header), $what))
+	  ->setWidth(3);
+}
+
+$section->add($group);
+
+$section->addInput(new Form_StaticText(
+	'',
+	"<span class='text-muted'>{$s(gettext('A header is a single number or a hyphenated range, such as 787134324 or 787134324-1593815189. Values must be 5 or greater and the four must not overlap: 1 through 4 are the standard WireGuard message types, which any header left empty keeps using. New tunnels get random headers, because a fixed value would itself be a signature.'))}</span>"
+));
+
+/*
+ * I1-I5 son paquetes basura con contenido elegido, no relleno aleatorio, y
+ * solo los entiende un backend 2.0.
+ */
+if ($awg2) {
+	$group = new Form_Group('Junk Payloads');
+
+	foreach (array('i1', 'i2', 'i3', 'i4', 'i5') as $payload) {
+		$group->add(new Form_Input(
+			$payload,
+			strtoupper($payload),
+			'text',
+			$pconfig[$payload]
+		))->addClass('trim')
+		  ->setHelp(strtoupper($payload))
+		  ->setWidth(2);
+	}
+
+	$section->add($group);
+
+	$section->addInput(new Form_StaticText(
+		'',
+		"<span class='text-muted'>{$s(gettext('Optional junk packets with content you choose, sent before the handshake. Leave empty unless you are matching a configuration that already uses them.'))}</span>"
+	));
+}
+
+$form->add($section);
+
+/*
+ * Los campos de AWG 2.0 no se dibujan contra un backend 1.x, pero lo que ya
+ * este guardado viaja igual en el POST: si no, editar cualquier otra cosa del
+ * tunel borraria valores que el usuario nunca vio, y que vuelven a servir en
+ * cuanto el backend se actualice.
+ */
+if (!$awg2) {
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		if ($spec['awg2']) {
+			$form->addGlobal(new Form_Input(
+				$field,
+				'',
+				'hidden',
+				$pconfig[$field]
+			));
+		}
+	}
+}
 
 $form->addGlobal(new Form_Input(
 	'mtu',

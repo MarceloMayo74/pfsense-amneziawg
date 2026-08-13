@@ -507,6 +507,11 @@ function awg_do_tunnel_post($post) {
 	$pconfig['mtu']			= empty($post['mtu']) ? $awgg['default_mtu'] : $post['mtu'];
 	$pconfig['addresses']['row'] 	= awg_tunnel_addresses($post);
 
+	// Los 16 parametros de ofuscacion. Todos son de interfaz, ninguno por peer.
+	foreach (array_keys($awgg['obfuscation_fields']) as $field) {
+		$pconfig[$field]	= isset($post[$field]) ? trim($post[$field]) : '';
+	}
+
 	$input_errors			= awg_validate_tunnel_post($pconfig, $tun_idx);
 
 	if (empty($input_errors)) {
@@ -852,6 +857,30 @@ function awg_make_tunnel_conf_file($tunnel, $include_endpoint = false) {
 
 	// Process interface ListenPort
 	$wc->set_interface_attr('ListenPort', $tunnel['listenport']);
+
+	/*
+	 * Los parametros de ofuscacion, todos a nivel [Interface].
+	 *
+	 * Los de AWG 2.0 se omiten contra un backend 1.x, y esto es lo unico que
+	 * de verdad tiene que respetar la version: awg(8) aborta el parseo del
+	 * archivo entero al encontrar una clave que no conoce, asi que un S3 de
+	 * mas no degrada la ofuscacion sino que deja el tunel sin levantar.
+	 *
+	 * El nombre de la clave es el del campo capitalizado -- jc/jmin/s1/h1/i1
+	 * dan Jc/Jmin/S1/H1/I1 -- que es exactamente como los nombra el parser de
+	 * amneziawg-tools.
+	 */
+	$awg2 = awg_backend_supports_awg2();
+
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		$value = trim((string) $tunnel[$field]);
+
+		if (($value === '') || ($spec['awg2'] && !$awg2)) {
+			continue;
+		}
+
+		$wc->set_interface_attr(ucfirst($field), $value);
+	}
 
 	// Process peer sections
 	foreach (awg_tunnel_get_peers_config($tunnel['name']) as [$peer_idx, $peer, $is_new]) {
