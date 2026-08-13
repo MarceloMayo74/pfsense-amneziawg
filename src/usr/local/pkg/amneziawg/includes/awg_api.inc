@@ -513,6 +513,137 @@ function awg_if_create($if_name, &$cmds = null) {
 	return awg_proc_start($if_name, $cmds);
 }
 
+/*
+ * Indica si el backend instalado entiende los campos de AmneziaWG 2.0
+ * (S3, S4, I1-I5).
+ *
+ * No se puede preguntar: 'awg --version' devuelve un numero sin relacion con
+ * la version del paquete (docs/arquitectura.md, seccion 11). La sonda es
+ * empirica, y aprovecha que awg(8) parsea el archivo ENTERO antes de tocar la
+ * interfaz. Un setconf contra una interfaz que no existe falla siempre, pero
+ * falla distinto segun entienda o no las claves:
+ *
+ *   clave desconocida  ->  "Line unrecognized: `X=1'" + "Configuration parsing error"
+ *   clave conocida     ->  "Unable to modify interface: Device not configured"
+ *
+ * Asi que no hace falta levantar un proceso ni crear una interfaz. Y es
+ * justo la pregunta que importa: lo que hay que saber es si es seguro escribir
+ * S3/S4 en el .conf. Si awg no los conoce aborta el parseo del archivo entero,
+ * de modo que un campo de mas no degrada la ofuscacion: impide que el tunel
+ * levante.
+ *
+ * El cache vive en run_path, que es tmpfs, asi que se revalida solo en cada
+ * boot. Es lo que se quiere: sobrevive a la sesion, no a una actualizacion del
+ * paquete.
+ */
+function awg_backend_supports_awg2($use_cache = true) {
+	global $awgg;
+
+	if ($use_cache && file_exists($awgg['awg2_cache'])) {
+		$cached = trim(file_get_contents($awgg['awg2_cache']));
+
+		if (($cached === '0') || ($cached === '1')) {
+			return ($cached === '1');
+		}
+	}
+
+	$supported = false;
+
+	if (file_exists($awgg['awg'])) {
+		$probe_conf = tempnam('/tmp', 'awgprobe');
+
+		if ($probe_conf !== false) {
+			/*
+			 * La clave privada nunca se aplica: el parseo es lo unico que
+			 * llega a correr. Pero tiene que ser sintacticamente valida, o el
+			 * archivo se rechazaria por el motivo equivocado.
+			 */
+			file_put_contents($probe_conf, implode("\n", array(
+				'[Interface]',
+				'PrivateKey = ' . base64_encode(random_bytes(32)),
+				'S3 = 20',
+				'S4 = 25',
+				'')));
+
+			// Una interfaz que no existe: el setconf no puede llegar a aplicarse.
+			$probe_if = 'awgprobe' . getmypid();
+
+			$res = awg_exec("{$awgg['awg']} setconf " .
+					escapeshellarg($probe_if) . ' ' .
+					escapeshellarg($probe_conf) . ' 2>&1');
+
+			$output = implode("\n", (array) $res['output']);
+
+			// Solo un rechazo de parseo dice que el backend no los entiende.
+			$supported = (stripos($output, 'unrecognized') === false) &&
+				     (stripos($output, 'parsing error') === false);
+
+			unlink($probe_conf);
+		}
+	}
+
+	if (!file_exists($awgg['run_path'])) {
+		mkdir($awgg['run_path'], 0700, true);
+	}
+
+	file_put_contents($awgg['awg2_cache'], $supported ? '1' : '0');
+
+	return $supported;
+}
+
+/*
+ * Sortea H1-H4 para un tunel nuevo.
+ *
+ * Los headers no tienen default: un valor fijo seria una firma nueva, que es
+ * exactamente lo que este paquete existe para no tener. Se sortean al crear el
+ * tunel.
+ *
+ * Dos reglas, las dos leidas de amneziawg-go y no inventadas aca:
+ *
+ *   - Minimo 5. El device arranca con los cuatro headers en los tipos de
+ *     mensaje estandar de WireGuard (1 init, 2 response, 3 cookie, 4
+ *     transport), y un header que no se setea conserva el suyo. Un valor
+ *     entre 1 y 4 chocaria con el default de los que quedaron vacios.
+ *   - Sin solaparse entre ellos. mergeWithDevice() los compara de a pares y
+ *     rechaza el setconf entero con "headers must not overlap".
+ *
+ * Se sortean valores sueltos y no rangos: cuatro enteros distintos no se
+ * pueden solapar, y el sorteo por tunel ya aporta la variabilidad que los
+ * rangos buscan.
+ */
+function awg_gen_headers() {
+	global $awgg;
+
+	$headers = array();
+
+	foreach (array('h1', 'h2', 'h3', 'h4') as $header) {
+		$spec = $awgg['obfuscation_fields'][$header];
+
+		do {
+			$candidate = random_int($spec['min'], $spec['max']);
+		} while (in_array($candidate, $headers, true));
+
+		$headers[$header] = $candidate;
+	}
+
+	return $headers;
+}
+
+/*
+ * Los limites de un header, que puede ser un valor suelto o un rango 'lo-hi'.
+ * Un valor suelto es el rango degenerado [n, n], que es como lo modela
+ * UintRange en el backend.
+ */
+function awg_header_bounds($value) {
+	$parts = explode('-', trim($value), 2);
+
+	$lo = (int) $parts[0];
+
+	$hi = (isset($parts[1]) && ($parts[1] !== '')) ? (int) $parts[1] : $lo;
+
+	return array($lo, $hi);
+}
+
 function awg_exec($cmd, $error_type = null, $error_flag = 1) {
 	$ret_code = 0;
 
