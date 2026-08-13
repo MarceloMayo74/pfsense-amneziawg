@@ -31,9 +31,12 @@ Lo que ya está resuelto ahí:
 
 ```
 docs/arquitectura.md      el documento de diseño
+src/                      el árbol del paquete, tal como se instala
+build/make-pkg.ps1        arma el .pkg
 spike/                    sondas contra el firewall
-reference/                código de terceros, no versionado
 tools/                    utilidades de desarrollo
+reference/                código de terceros, no versionado
+bin/                      binarios por ABI, no versionado
 ```
 
 `reference/` está en el `.gitignore` porque es código de otros autores. Para
@@ -41,6 +44,35 @@ recuperarlo en un clon nuevo:
 
 ```sh
 sh tools/fetch-references.sh
+```
+
+## Compilar el paquete
+
+Hay **un `.pkg` por ABI**: el paquete lleva adentro `amneziawg-go` y `awg`, y
+los binarios de FreeBSD 15 y 16 no son intercambiables.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build\make-pkg.ps1 -Abi FreeBSD:16:amd64
+```
+
+El script busca los binarios en `bin/<ABI>/` y solo intenta descargarlos si no
+están. Si la máquina de build no llega a `pkg.freebsd.org`, se traen desde un
+firewall que corra ese ABI — que por definición sí llega:
+
+```sh
+# en el pfSense
+sh /root/fetch-binaries.sh
+```
+```powershell
+# de vuelta acá
+scp root@FIREWALL:/root/awg-bin-FreeBSD:16:amd64.tar.gz .
+tar -xzf awg-bin-FreeBSD:16:amd64.tar.gz -C bin\FreeBSD-16-amd64\
+```
+
+Instalar:
+
+```sh
+pkg add /root/pfSense-pkg-AmneziaWG-0.1.0-FreeBSD-16-amd64.pkg
 ```
 
 ## Objetivo
