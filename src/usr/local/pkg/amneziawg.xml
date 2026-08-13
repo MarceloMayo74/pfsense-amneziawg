@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE packagegui SYSTEM "../schema/packages.dtd">
+<?xml-stylesheet type="text/xsl" href="../xsl/package.xsl"?>
+<packagegui>
+	<copyright>
+	<![CDATA[
+/*
+ * amneziawg.xml
+ *
+ * part of pfSense (https://www.pfsense.org)
+ * Copyright (c) 2015-2026 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2021 R. Christian McDonald
+ * Copyright (2) 2020 Ascrod
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+	]]>
+	</copyright>
+	<name>amneziawg</name>
+	<version>%%PKGVERSION%%</version>
+	<title>VPN/AmneziaWG</title>
+	<donotsave>true</donotsave>
+	<include_file>/usr/local/pkg/amneziawg/includes/wg.inc</include_file>
+	<menu>
+		<name>AmneziaWG</name>
+		<section>VPN</section>
+		<url>/wg/vpn_aawg_tunnels.php</url>
+	</menu>
+	<menu>
+		<name>AmneziaWG</name>
+		<section>Status</section>
+		<url>/wg/status_amneziawg.php</url>
+	</menu>
+	<service>
+		<name>amneziawg</name>
+		<rcfile>amneziawgd</rcfile>
+		<executable>php_awg</executable>
+		<description>AmneziaWG</description>
+	</service>
+	<custom_php_install_command>
+		<![CDATA[
+		awg_install();
+		]]>
+	</custom_php_install_command>
+	<custom_php_pre_deinstall_command>
+		<![CDATA[
+		awg_deinstall();
+		]]>
+	</custom_php_pre_deinstall_command>
+	<custom_php_resync_config_command>
+		<![CDATA[
+		awg_resync();
+		]]>
+	</custom_php_resync_config_command>
+</packagegui>
