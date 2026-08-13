@@ -1,0 +1,8 @@
+# Todo el contenido de este repo termina en un FreeBSD: los .sh se ejecutan en
+# el firewall y los .php/.inc los sirve pfSense. Con CRLF el shebang falla.
+# Se fuerza LF pase lo que pase el core.autocrlf de la maquina de desarrollo.
+* text=auto eol=lf
+
+# Binarios que se traen del repo de paquetes de FreeBSD al empaquetar.
+*.pkg binary
+bin/* binary

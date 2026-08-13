@@ -1,0 +1,17 @@
+# Third party code kept locally as a reference while developing.
+# It belongs to its own authors and is not redistributed here.
+# See docs/arquitectura.md for what each one is for.
+reference/
+
+# Build output. Releases are published as GitHub Release assets instead.
+dist/
+
+# Binaries pulled from the FreeBSD package repo at build time, per ABI.
+bin/
+
+# Editors and OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp
