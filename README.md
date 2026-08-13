@@ -8,39 +8,45 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: fase 2 casi terminada.** El paquete ya compila y debería instalar,
-> pero todavía no se probó en un firewall.
+> **Estado: fase 2 terminada.** El paquete instala, aparece en el menú y
+> desinstala limpio en 2.9.0-BETA. Todavía no se pueden levantar túneles.
 
 ## Estado por fase
 
 | Fase | | Estado |
 |---|---|---|
 | 1 | Data plane a mano | ✅ validada en 2.9.0-BETA el 13-08-2026 |
-| 2 | Esqueleto del paquete | ⬜ falta instalarlo y verificar el menú |
-| 3 | Los 16 campos de ofuscación | — |
+| 2 | Esqueleto del paquete | ✅ instalado y verificado en 2.9.0-BETA el 13-08-2026 |
+| 3 | Los 16 campos de ofuscación | ⬜ el que sigue |
 | 4 | Supervisión de los procesos | — |
 | 5 | Watchdog | — |
 | 6 | Integración con wgeasy | — |
 
+Lo verificado en la fase 2, sobre el firewall: `pkg add` corre `awg_install()`
+entero, las dos entradas de menú quedan registradas, las cuatro páginas y el JS
+responden 200, los binarios que van adentro del `.pkg` ejecutan en la máquina, y
+`pkg delete` borra todo — archivos, menú, grupo de interfaces, servicio— sin
+dejar procesos ni interfaces. Lo único que sobrevive a propósito es el bloque de
+settings en `config.xml`, porque `keep_conf` viene en `yes`.
+
+Durante esa prueba apareció el bug que tenía el árbol desde el fork: en
+`tools/fork-from-wireguard.sh` la regla `s/vpn_wg_/vpn_awg_/g` corría antes que
+`s/wg_/awg_/g`, y la segunda volvía a matchear el `wg_` que quedaba adentro del
+`awg_` recién escrito. Resultado: ~130 referencias `vpn_aawg_*` y las URLs
+todavía apuntando a `/wg/`. Los nombres de archivo estaban bien, así que el
+árbol parecía correcto y en realidad ningún link resolvía: el menú habría caído
+en 404, o peor, en las páginas del paquete oficial de WireGuard si está
+instalado. Está arreglado en el árbol y en el script.
+
 ### Próximo paso concreto
 
-Traer los binarios y probar el paquete en el firewall:
+**Fase 3: los 16 campos de ofuscación.** El formulario de túnel todavía es el de
+WireGuard; hay que agregar `Jc`, `Jmin`, `Jmax`, `S1`, `S2`, `H1`–`H4` y el
+resto, con sus validaciones — acordarse de que `H1`–`H4` son texto que acepta
+rangos, no enteros. Ver `docs/arquitectura.md`.
 
-```sh
-# en el pfSense 2.9.0-BETA
-sh /root/fetch-binaries.sh
-```
-```powershell
-# acá
-scp admin@FIREWALL:/root/awg-bin-FreeBSD:16:amd64.tar.gz .
-tar -xzf awg-bin-FreeBSD:16:amd64.tar.gz -C bin\FreeBSD-16-amd64\
-powershell -ExecutionPolicy Bypass -File build\make-pkg.ps1 -Abi FreeBSD:16:amd64
-```
-
-Lo que se espera: que instale, aparezca en **VPN → AmneziaWG** y desinstale
-limpio. Lo que **no** va a andar todavía es levantar túneles desde la GUI — el
-daemon no supervisa los procesos (fase 4) y el formulario no tiene los campos
-de ofuscación (fase 3).
+Lo que **no** va a andar hasta la fase 4 es levantar túneles desde la GUI: el
+daemon todavía no supervisa los procesos `amneziawg-go`.
 
 ## Por dónde empezar
 
