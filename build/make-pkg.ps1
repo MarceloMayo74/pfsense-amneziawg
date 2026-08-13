@@ -165,6 +165,13 @@ foreach ($entry in $files.GetEnumerator()) {
     if ($isText) {
         # Normalize to LF, no BOM: what pfSense itself ships
         $text = [System.IO.File]::ReadAllText($srcFile) -replace "`r`n", "`n"
+
+        # src/ keeps the ports template's %%PKGVERSION%%, so the tree stays
+        # honest about where it came from and the version has a single source
+        # of truth here. Nothing else substitutes it: left alone, Package
+        # Manager shows the literal placeholder as the version.
+        $text = $text -replace '%%PKGVERSION%%', $version
+
         [System.IO.File]::WriteAllText($dstFile, $text, (New-Object System.Text.UTF8Encoding($false)))
     } else {
         Copy-Item $srcFile $dstFile
