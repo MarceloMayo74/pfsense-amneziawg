@@ -71,6 +71,9 @@ find "$DEST" -type f -exec sed -i \
 	-e "s|'wg/|'awg/|g" \
 	-e 's|/wg\.inc|/awg.inc|g' \
 	-e 's/wgRegTrim/awgRegTrim/g' \
+	-e 's/\barray_get_value\b/awg_array_get_value/g' \
+	-e 's/\barray_set_value\b/awg_array_set_value/g' \
+	-e 's/\barray_unset_value\b/awg_array_unset_value/g' \
 	-e 's/wgg/awgg/g' \
 	-e 's/wgconfig/awgconfig/g' \
 	-e "s/'wg'/'awg'/g" \

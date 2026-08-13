@@ -265,6 +265,25 @@ Los dos primeros ya están resueltos por las decisiones de arquitectura. El
 resto es renombrado disciplinado en `awg_globals.inc`, donde toda la identidad
 del paquete está centralizada.
 
+### El espacio de nombres de PHP también es un recurso compartido
+
+Falta uno en esa tabla, y no es de runtime: **las funciones, clases y
+constantes globales de PHP**. Hay páginas que cargan los dos paquetes en el
+mismo proceso —el dashboard, donde conviven los widgets— y ahí el segundo en
+cargarse aborta con `Cannot redeclare function`. El usuario no puede hacer nada
+salvo desinstalar uno.
+
+El renombrado del fork cubre todo lo que tiene `wg` en el nombre. Lo que se
+escapa son los helpers de nombre genérico: `array_get_value()`,
+`array_set_value()` y `array_unset_value()` venían así del paquete de WireGuard
+y rompían el dashboard. Ahora llevan prefijo `awg_`.
+
+La regla es que **todo símbolo global que declare este paquete lleve su
+prefijo**, y se verifica con `tools/check-collisions.sh`, que compara `src/`
+contra el paquete oficial en `reference/`. Ojo al buscar a mano: las funciones
+que devuelven por referencia se declaran `function &nombre`, y olvidarse del
+`&` esconde justamente la que rompía.
+
 ---
 
 ## 9. Build y distribución

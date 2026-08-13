@@ -229,7 +229,21 @@ $awgg['shellcmdentries']		= array(
 						'cmdtype' => 'earlyshellcmd',
 						'description' => 'AmneziaWG earlyshellcmd (DO NOT EDIT/DELETE!)'));
 
-function &array_get_value(array &$array, $parents) {
+/*
+ * Helpers de arrays anidados heredados del paquete de WireGuard.
+ *
+ * Llevan prefijo del paquete y no el nombre generico con el que venian, que es
+ * el que usa el paquete oficial. PHP tiene un unico espacio de nombres para las
+ * funciones globales, asi que con los dos paquetes instalados -- que es un
+ * objetivo declarado, ver docs/arquitectura.md seccion 8 -- la segunda copia en
+ * cargarse aborta con "Cannot redeclare function". No es una colision teorica:
+ * pasaba al abrir el dashboard, donde conviven los widgets de ambos.
+ *
+ * El renombrado mecanico del fork no las toco porque no tienen 'wg' en el
+ * nombre. La regla que importa es que todo simbolo global que declare este
+ * paquete lleve su prefijo; tools/check-collisions.sh la verifica.
+ */
+function &awg_array_get_value(array &$array, $parents) {
 	$ref = &$array;
 
 	foreach ((array) $parents as $parent) {
@@ -243,7 +257,7 @@ function &array_get_value(array &$array, $parents) {
 	return $ref;
 }
 
-function array_set_value(array &$array, $parents, $value) {
+function awg_array_set_value(array &$array, $parents, $value) {
 	$ref = &$array;
 
 	foreach ((array) $parents as $parent) {
@@ -257,13 +271,13 @@ function array_set_value(array &$array, $parents, $value) {
 	$ref = $value;
 }
 
-function array_unset_value(&$array, $parents) {
+function awg_array_unset_value(&$array, $parents) {
 	$key = array_shift($parents);
 
 	if (empty($parents)) {
 		unset($array[$key]);
 	} else {
-		array_unset_value($array[$key], $parents);
+		awg_array_unset_value($array[$key], $parents);
 	}
 }
 
