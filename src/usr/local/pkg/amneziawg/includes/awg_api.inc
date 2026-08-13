@@ -211,12 +211,105 @@ function awg_proc_logfile($if_name) {
 }
 
 /*
- * Un tunel esta corriendo si su socket de control existe. Es mejor senal que
- * mirar la tabla de procesos: el socket es justo lo que awg(8) necesita, asi
- * que si esta, el tunel es utilizable.
+ * El pid vivo del proceso de un tunel, o false.
+ *
+ * Esto miraba solo si existia el socket de control, con el argumento de que el
+ * socket es lo que awg(8) necesita. El argumento vale mientras los procesos se
+ * bajen bien, y se cae justo en el caso que un supervisor existe para atender.
+ * Medido sobre el firewall:
+ *
+ *   SIGTERM   proceso se va, socket se va, interfaz se va
+ *   SIGKILL   proceso se va, socket QUEDA, interfaz QUEDA
+ *
+ * amneziawg-go solo limpia lo suyo si lo dejan. Con el socket como unica senal,
+ * un tunel caido pasaba a parecer vivo para siempre: el sync no lo revivia
+ * porque lo veia corriendo, y el destroy no lo limpiaba por lo mismo.
  */
+function awg_proc_pid($if_name) {
+	global $awgg;
+
+	$pidfile = awg_proc_pidfile($if_name);
+
+	if (file_exists($pidfile)) {
+		$pid = (int) trim((string) @file_get_contents($pidfile));
+
+		if (($pid > 0) && posix_kill($pid, 0)) {
+			return $pid;
+		}
+	}
+
+	/*
+	 * Sin pidfile utilizable queda buscar por linea de comandos. Lleva el
+	 * nombre de la interfaz y se ancla al final, asi que no puede levantar el
+	 * proceso de otro tunel.
+	 */
+	$out = array();
+
+	exec('/bin/pgrep -f ' . escapeshellarg("{$awgg['awg_go']} {$if_name}$"), $out);
+
+	foreach ($out as $line) {
+		$pid = (int) trim($line);
+
+		if ($pid > 0) {
+			return $pid;
+		}
+	}
+
+	return false;
+}
+
 function awg_proc_is_running($if_name) {
-	return file_exists(awg_uapi_sock($if_name));
+	return (awg_proc_pid($if_name) !== false);
+}
+
+/*
+ * Limpia lo que un proceso caido no pudo limpiar solo: el socket de control, el
+ * pidfile, y la interfaz si sobrevivio. No toca nada si el proceso esta vivo.
+ *
+ * Devuelve true si habia algo que limpiar, que es lo mismo que decir que ese
+ * tunel se cayo en vez de haberse bajado.
+ */
+function awg_proc_reap($if_name, &$cmds = null) {
+	global $awgg;
+
+	$s = fn($x) => $x;
+
+	if (awg_proc_is_running($if_name)) {
+		return false;
+	}
+
+	$reaped = false;
+
+	foreach (array(awg_uapi_sock($if_name), awg_proc_pidfile($if_name)) as $path) {
+		if (file_exists($path)) {
+			unlink_if_exists($path);
+
+			$reaped = true;
+		}
+	}
+
+	if (does_interface_exist($if_name)) {
+		$cmd = "{$awgg['ifconfig']} {$s(escapeshellarg($if_name))} destroy 2>&1";
+
+		$cmds[] = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
+
+		$reaped = true;
+	}
+
+	return $reaped;
+}
+
+/*
+ * Las interfaces del rango de este paquete que existen en el sistema, las haya
+ * creado un proceso vivo o las haya dejado uno que se cayo.
+ */
+function awg_get_system_ifs() {
+	global $awgg;
+
+	$pattern = "/^{$awgg['if_prefix']}9\d{3}$/";
+
+	return array_values(array_filter(pfSense_interface_listget(),
+					 fn($if) => preg_match($pattern, $if)));
 }
 
 /*
@@ -259,6 +352,13 @@ function awg_proc_start($if_name, &$cmds = null) {
 
 	safe_mkdir($awgg['run_path'], 0700);
 
+	/*
+	 * Si el tunel anterior se cayo, su socket y su interfaz siguen ahi y el
+	 * proceso nuevo no puede reusar ninguno de los dos. Se limpia antes de
+	 * arrancar, no despues.
+	 */
+	awg_proc_reap($if_name, $cmds);
+
 	$cmd = "{$awgg['daemon']} -p {$s(escapeshellarg(awg_proc_pidfile($if_name)))} " .
 	       "{$s(escapeshellarg($awgg['awg_go']))} {$s(escapeshellarg($if_name))} " .
 	       ">> {$s(escapeshellarg(awg_proc_logfile($if_name)))} 2>&1";
@@ -283,47 +383,56 @@ function awg_proc_start($if_name, &$cmds = null) {
 }
 
 /*
- * Baja el proceso de un tunel.
+ * Baja el proceso de un tunel y no deja nada suyo atras.
  *
- * No hace falta destruir la interfaz aparte: cuando muere amneziawg-go, el tun
- * se va con el. Se intenta primero por pidfile y se cae a buscar por linea de
- * comandos, que lleva el nombre de la interfaz y por eso no puede matar otro
- * tunel por accidente.
+ * SIGTERM primero, porque es la unica senal con la que amneziawg-go limpia su
+ * socket y se lleva la interfaz. Si no se va por las buenas se escala a
+ * SIGKILL, que deja las dos cosas colgadas, y de eso se encarga el reap.
+ *
+ * Salga como salga, al final se limpia. La version anterior devolvia false sin
+ * haber destruido la interfaz, y como awg_if_destroy() cortaba con ese false
+ * antes de su propia red de seguridad, un tunel caido dejaba la interfaz
+ * ocupando el nombre para siempre.
  */
 function awg_proc_stop($if_name, &$cmds = null) {
 	global $awgg;
 
-	$s = fn($x) => $x;
+	if ($pid = awg_proc_pid($if_name)) {
+		posix_kill($pid, SIGTERM);
 
-	if (!awg_proc_is_running($if_name)) {
-		return true;
+		for ($i = 0; ($i < 20) && awg_proc_is_running($if_name); $i++) {
+			usleep(100000);
+		}
+
+		if (awg_proc_is_running($if_name)) {
+			$cmds[] = array(
+				'cmd'		=> "kill -TERM {$pid} ({$if_name})",
+				'output'	=> array(sprintf(gettext('%s did not exit on SIGTERM, escalating'), $if_name)),
+				'ret_code'	=> 0,
+				'errors'	=> array());
+
+			posix_kill($pid, SIGKILL);
+
+			for ($i = 0; ($i < 10) && awg_proc_is_running($if_name); $i++) {
+				usleep(100000);
+			}
+		}
 	}
 
-	$pidfile = awg_proc_pidfile($if_name);
+	// Se haya ido solo o a la fuerza, no puede quedar rastro suyo.
+	awg_proc_reap($if_name, $cmds);
 
-	if (file_exists($pidfile)) {
-		killbypid($pidfile);
-	} else {
-		$cmd = "/bin/pkill -f {$s(escapeshellarg("{$awgg['awg_go']} {$if_name}"))} 2>&1";
-		$cmds[] = awg_exec($cmd, 'process', AWG_ERROR_PROC_STOP);
+	if (awg_proc_is_running($if_name)) {
+		$cmds[] = array(
+			'cmd'		=> "kill -KILL ({$if_name})",
+			'output'	=> array(sprintf(gettext('See %s'), awg_proc_logfile($if_name))),
+			'ret_code'	=> AWG_ERROR_PROC_STOP,
+			'errors'	=> awg_get_errors('process', AWG_ERROR_PROC_STOP));
+
+		return false;
 	}
 
-	// Darle un momento a que se retire y limpie su socket.
-	for ($i = 0; $i < 20 && awg_proc_is_running($if_name); $i++) {
-		usleep(100000);
-	}
-
-	// Si quedo el socket colgado, el proceso ya no esta para borrarlo.
-	if (!awg_proc_is_running($if_name)) {
-		unlink_if_exists($pidfile);
-
-		return true;
-	}
-
-	unlink_if_exists(awg_uapi_sock($if_name));
-	unlink_if_exists($pidfile);
-
-	return false;
+	return true;
 }
 
 function awg_ifconfig_if_updown($if_name, $up = true, &$cmds = null) {
@@ -679,24 +788,10 @@ function awg_get_errors($type, $ret_code) {
  * sin necesidad de 'ifconfig destroy'.
  */
 function awg_if_destroy($if_name, &$cmds = null) {
-	global $awgg;
+	// awg_proc_stop() ya se lleva el socket y la interfaz huerfana si la hay.
+	$stopped = awg_proc_stop($if_name, $cmds);
 
-	$s = fn($x) => $x;
-
-	if (!awg_proc_stop($if_name, $cmds)) {
-		return false;
-	}
-
-	// Red de seguridad: si por lo que sea la interfaz sobrevivio al proceso,
-	// se la saca a mano para no dejar una huerfana ocupando el nombre.
-	if (does_interface_exist($if_name)) {
-		$cmd = "{$awgg['ifconfig']} {$s(escapeshellarg($if_name))} destroy 2>&1";
-		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
-
-		return ($res['ret_code'] == 0);
-	}
-
-	return true;
+	return ($stopped && !does_interface_exist($if_name));
 }
 
 function awg_gateways_set_enable($enable = true, $filter_configure = true) {
