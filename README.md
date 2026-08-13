@@ -8,13 +8,47 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: diseño cerrado, sin implementar.** No hay paquete todavía. Lo que
-> hay es el documento de arquitectura y el spike que lo fundamenta.
+> **Estado: fase 2 casi terminada.** El paquete ya compila y debería instalar,
+> pero todavía no se probó en un firewall.
+
+## Estado por fase
+
+| Fase | | Estado |
+|---|---|---|
+| 1 | Data plane a mano | ✅ validada en 2.9.0-BETA el 13-08-2026 |
+| 2 | Esqueleto del paquete | ⬜ falta instalarlo y verificar el menú |
+| 3 | Los 16 campos de ofuscación | — |
+| 4 | Supervisión de los procesos | — |
+| 5 | Watchdog | — |
+| 6 | Integración con wgeasy | — |
+
+### Próximo paso concreto
+
+Traer los binarios y probar el paquete en el firewall:
+
+```sh
+# en el pfSense 2.9.0-BETA
+sh /root/fetch-binaries.sh
+```
+```powershell
+# acá
+scp admin@FIREWALL:/root/awg-bin-FreeBSD:16:amd64.tar.gz .
+tar -xzf awg-bin-FreeBSD:16:amd64.tar.gz -C bin\FreeBSD-16-amd64\
+powershell -ExecutionPolicy Bypass -File build\make-pkg.ps1 -Abi FreeBSD:16:amd64
+```
+
+Lo que se espera: que instale, aparezca en **VPN → AmneziaWG** y desinstale
+limpio. Lo que **no** va a andar todavía es levantar túneles desde la GUI — el
+daemon no supervisa los procesos (fase 4) y el formulario no tiene los campos
+de ofuscación (fase 3).
 
 ## Por dónde empezar
 
 Leé **[docs/arquitectura.md](docs/arquitectura.md)**. Tiene las decisiones
 tomadas, el porqué de cada una, y el orden de implementación en seis fases.
+
+El historial de git es parte de la documentación: cada commit explica qué
+cambió y por qué, no solo qué archivos se tocaron.
 
 Lo que ya está resuelto ahí:
 
