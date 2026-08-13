@@ -2,19 +2,15 @@
 <pfsensepkgs>
 	<package>
 		<name>AmneziaWG</name>
-		<descr><![CDATA[AmneziaWG is an extremely simple yet fast and modern VPN&lt;br /&gt;
-				that utilizes state-of-the-art cryptography. It aims to be&lt;br /&gt;
-				faster, simpler, leaner, and more useful than IPSec, while&lt;br /&gt;
-				avoiding the massive headache. It intends to be considerably&lt;br /&gt;
-				more performant than OpenVPN. AmneziaWG is designed as a&lt;br /&gt;
-				general purpose VPN for running on embedded interfaces and&lt;br /&gt;
-				super computers alike, fit for many different circumstances.&lt;br /&gt;
-				Initially released for the Linux kernel, it is now&lt;br /&gt;
-				cross-platform and widely deployable. It is currently under&lt;br /&gt;
-				heavy development, but already it might be regarded as the&lt;br /&gt;
-				most secure, easiest to use, and simplest VPN solution in&lt;br /&gt;
-				the industry.]]></descr>
-		<pkginfolink>https://github.com/pfsense/FreeBSD-ports/commits/devel/net/pfSense-pkg-AmneziaWG</pkginfolink>
+		<descr><![CDATA[AmneziaWG is a fork of WireGuard that gets past deep packet&lt;br /&gt;
+				inspection. The cryptography is WireGuard's, unchanged; what&lt;br /&gt;
+				differs is the shape of the packets on the wire, so a DPI box&lt;br /&gt;
+				cannot recognise the handshake by its signature and block it.&lt;br /&gt;
+				This package adds VPN &gt; AmneziaWG, managing tunnels and peers&lt;br /&gt;
+				from the GUI along with the obfuscation parameters that make&lt;br /&gt;
+				the traffic unrecognisable. The data plane is amneziawg-go in&lt;br /&gt;
+				userspace, so no kernel module is required.]]></descr>
+		<pkginfolink>https://github.com/MarceloMayo74/pfsense-amneziawg</pkginfolink>
 		<version>%%PKGVERSION%%</version>
 		<configurationfile>amneziawg.xml</configurationfile>
 	</package>
