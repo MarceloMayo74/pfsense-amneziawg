@@ -147,7 +147,119 @@ function awg_validate_tunnel_post($pconfig, $idx_from_post) {
 		}
 	}
 
+	// Check the obfuscation parameters
+	$input_errors = array_merge($input_errors, awg_validate_obfuscation($pconfig));
+
 	// Consumers expect an array
+	return $input_errors;
+}
+
+/*
+ * Valida los 16 parametros de ofuscacion.
+ *
+ * Se valida el rango de todos los campos siempre, incluso los de AWG 2.0
+ * contra un backend 1.x. Lo que NO se hace es rechazar un campo 2.0 por correr
+ * contra un backend viejo: el valor puede venir de otro firewall o de un
+ * backend que se actualice despues, y bloquear el save obligaria a borrarlo
+ * para poder tocar cualquier otra cosa del tunel. Que no llegue al .conf ya lo
+ * garantiza awg_make_tunnel_conf_file(), que es donde importa.
+ */
+function awg_validate_obfuscation($pconfig) {
+	global $awgg;
+
+	$input_errors = array();
+
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		$value = trim((string) $pconfig[$field]);
+
+		$label = ucfirst($field);
+
+		// Todos son opcionales
+		if ($value === '') {
+			continue;
+		}
+
+		switch ($spec['type']) {
+			case 'int':
+				if (!ctype_digit($value) ||
+				    ((int) $value < $spec['min']) ||
+				    ((int) $value > $spec['max'])) {
+					$input_errors[] = sprintf(
+						gettext('%1$s must be a whole number between %2$s and %3$s.'),
+						$label, $spec['min'], $spec['max']);
+				}
+				break;
+
+			case 'hdr':
+				if (!preg_match($awgg['header_mask'], $value)) {
+					$input_errors[] = sprintf(
+						gettext('%s must be a number, or a hyphenated range such as 12345-67890.'),
+						$label);
+					break;
+				}
+
+				[$lo, $hi] = awg_header_bounds($value);
+
+				if ($hi < $lo) {
+					$input_errors[] = sprintf(
+						gettext('%s has its range reversed: the lower bound cannot be greater than the upper bound.'),
+						$label);
+				}
+
+				/*
+				 * El minimo no es cosmetico. Un header que no se setea
+				 * conserva el tipo de mensaje estandar de WireGuard, del 1 al
+				 * 4, asi que cualquier valor ahi abajo se pisa con el default
+				 * de los que quedaron vacios.
+				 */
+				if (($lo < $spec['min']) || ($hi > $spec['max'])) {
+					$input_errors[] = sprintf(
+						gettext('%1$s must be between %2$s and %3$s. Values below %2$s are the standard WireGuard message types, which any header left empty still uses.'),
+						$label, $spec['min'], $spec['max']);
+				}
+				break;
+		}
+	}
+
+	// Los paquetes basura no pueden tener un minimo mayor que su maximo
+	$jmin = trim((string) $pconfig['jmin']);
+	$jmax = trim((string) $pconfig['jmax']);
+
+	if (($jmin !== '') && ($jmax !== '') &&
+	    ctype_digit($jmin) && ctype_digit($jmax) &&
+	    ((int) $jmin > (int) $jmax)) {
+		$input_errors[] = gettext('Jmin cannot be greater than Jmax.');
+	}
+
+	/*
+	 * amneziawg-go compara los cuatro headers de a pares y rechaza el setconf
+	 * ENTERO si dos se pisan, asi que un solapamiento no rompe un campo: deja
+	 * el tunel sin levantar.
+	 */
+	$ranges = array();
+
+	foreach (array('h1', 'h2', 'h3', 'h4') as $header) {
+		$value = trim((string) $pconfig[$header]);
+
+		if (($value !== '') && preg_match($awgg['header_mask'], $value)) {
+			$ranges[$header] = awg_header_bounds($value);
+		}
+	}
+
+	foreach ($ranges as $left => $lr) {
+		foreach ($ranges as $right => $rr) {
+			if ($left >= $right) {
+				continue;
+			}
+
+			if (($lr[0] <= $rr[1]) && ($rr[0] <= $lr[1])) {
+				$input_errors[] = sprintf(
+					gettext('%1$s and %2$s overlap. The backend rejects the entire tunnel configuration when any two headers share a value.'),
+					ucfirst($left), ucfirst($right));
+			}
+		}
+	}
+
 	return $input_errors;
 }
 
