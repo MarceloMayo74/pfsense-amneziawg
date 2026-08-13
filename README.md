@@ -8,8 +8,9 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: fase 2 terminada.** El paquete instala, aparece en el menú y
-> desinstala limpio en 2.9.0-BETA. Todavía no se pueden levantar túneles.
+> **Estado: fase 3 terminada.** El paquete instala, aparece en el menú y ya
+> tiene los 16 campos de ofuscación, validados y serializados al `.conf`.
+> Todavía no se pueden levantar túneles desde la GUI: falta la fase 4.
 
 ## Estado por fase
 
@@ -17,8 +18,8 @@ firma.
 |---|---|---|
 | 1 | Data plane a mano | ✅ validada en 2.9.0-BETA el 13-08-2026 |
 | 2 | Esqueleto del paquete | ✅ instalado y verificado en 2.9.0-BETA el 13-08-2026 |
-| 3 | Los 16 campos de ofuscación | ⬜ el que sigue |
-| 4 | Supervisión de los procesos | — |
+| 3 | Los 16 campos de ofuscación | ✅ verificados de punta a punta el 13-08-2026 |
+| 4 | Supervisión de los procesos | ⬜ el que sigue |
 | 5 | Watchdog | — |
 | 6 | Integración con wgeasy | — |
 
@@ -38,15 +39,23 @@ todavía apuntando a `/wg/`. Los nombres de archivo estaban bien, así que el
 en 404, o peor, en las páginas del paquete oficial de WireGuard si está
 instalado. Está arreglado en el árbol y en el script.
 
+De la fase 3, sobre el firewall: guardar un túnel por el mismo camino que usa
+la GUI produce un `.conf` con los 16 parámetros en `[Interface]`, y `awg(8)` lo
+parsea (contra un control negativo que sí rechaza). `H1` sobrevive como rango.
+La sección Obfuscation renderiza con `H1`–`H4` como texto y `Jc`/`Jmin`/`Jmax`
+como número, los headers salen sorteados y distintos en cada túnel nuevo, y la
+validación rechaza headers solapados, valores por debajo de 5, `Jmin > Jmax` y
+los fuera de rango. Hay 38 tests de la validación en `tools/test-obfuscation.php`.
+
 ### Próximo paso concreto
 
-**Fase 3: los 16 campos de ofuscación.** El formulario de túnel todavía es el de
-WireGuard; hay que agregar `Jc`, `Jmin`, `Jmax`, `S1`, `S2`, `H1`–`H4` y el
-resto, con sus validaciones — acordarse de que `H1`–`H4` son texto que acepta
-rangos, no enteros. Ver `docs/arquitectura.md`.
+**Fase 4: supervisión de los procesos.** `awg_service.inc` tiene que ser un
+supervisor de N procesos `amneziawg-go`: arranque al boot, parada ordenada, y
+reinicio de un túnel sin tocar los otros. Es lo que falta para poder levantar
+un túnel desde la GUI.
 
-Lo que **no** va a andar hasta la fase 4 es levantar túneles desde la GUI: el
-daemon todavía no supervisa los procesos `amneziawg-go`.
+Acordarse de lo que dejó la fase 1: matar el proceso destruye la interfaz solo,
+no hace falta `ifconfig destroy`.
 
 ## Por dónde empezar
 

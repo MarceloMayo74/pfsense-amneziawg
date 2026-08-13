@@ -202,6 +202,25 @@ Todos a nivel `[Interface]`. Rangos tomados del `Instance.xml` de OPNsense.
 (`787134324-1593815189`). Si se modelan como `Form_Input` numérico se rompe
 silenciosamente con configs reales.
 
+**Dos restricciones más, leídas de `amneziawg-go` en la fase 3.** Ninguna de
+las dos está en el modelo de OPNsense, y las dos dejan el túnel sin levantar
+porque el backend rechaza el `setconf` **entero**, no el campo:
+
+- **Los cuatro headers no se pueden solapar.** `mergeWithDevice()`
+  (`device/uapi.go`) los compara de a pares con `UintRange.Overlap()` y corta
+  con `headers must not overlap`. Como `H` puede ser un rango, "solaparse" es
+  intersección de intervalos, no igualdad.
+
+- **De ahí sale el mínimo de 5**, y no es cosmético. El device arranca con los
+  headers en los tipos de mensaje estándar de WireGuard (1 init, 2 response,
+  3 cookie, 4 transport) y un `H` que no se setea **conserva el suyo**. Así que
+  cualquier valor entre 1 y 4 choca con el default de los que quedaron vacíos.
+
+Hay una tercera que **no** se valida: `S1`–`S4` deben ser ≥ 12
+(`HeaderCipherNonceSize`) *solo* si hay clave de header protection, que este
+paquete no expone. Validarla rechazaría `S1 = 0`, que es válido y es el mínimo
+documentado.
+
 **Versionado del protocolo.** `S3`, `S4`, los rangos en `H` y los `I1`–`I5` son
 AWG 2.0. Contra un backend 1.x esos campos no deben escribirse en el `.conf`.
 La GUI tiene que saber contra qué versión de backend corre.
@@ -339,8 +358,16 @@ las referencias tiene y la que hace usable el modo servidor.
   y `amneziawg-go` dice `0.0.20250522` siendo el paquete `0.2.16_7`. Las
   versiones que reportan los binarios no tienen relación con las del paquete.
   El método confiable es la **sonda empírica**: intentar un `setconf` con
-  `S3`/`S4` y ver si lo acepta. El paquete debería hacerlo una vez al instalar
-  y cachear el resultado.
+  `S3`/`S4` y ver si lo acepta.
+
+  **Implementado en la fase 3** como `awg_backend_supports_awg2()`, y sale más
+  barata de lo previsto: no hace falta ni interfaz ni proceso. `awg(8)` parsea
+  el archivo entero *antes* de tocar la interfaz, así que un `setconf` contra
+  una interfaz inexistente falla siempre pero falla distinto —
+  `Configuration parsing error` si no conoce la clave, `Device not configured`
+  si sí—. Y es justo la pregunta que importa: lo que hay que saber es si es
+  seguro escribir `S3`/`S4` en el `.conf`. El resultado se cachea en
+  `run_path`, que es tmpfs, así que se revalida solo en cada boot.
 
 - **Lectura del estado.** `awg show <if>` devuelve los parámetros de ofuscación
   ya aplicados (`jc`, `jmin`, `jmax`, `s1`, `s2`, `h1`–`h4`), no solo el
