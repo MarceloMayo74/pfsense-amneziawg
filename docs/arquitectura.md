@@ -284,10 +284,22 @@ fetch -qo - https://pkg.freebsd.org/${ABI}/latest/packagesite.pkg \
 Cada fase deja algo verificable. No se pasa a la siguiente sin que la anterior
 funcione en el firewall.
 
-**Fase 1 — Data plane a mano.** Sin GUI. Bajar los binarios, escribir un
-`.conf` a mano, levantar un túnel con `daemon` + `awg setconf`, asignarlo en
-Interfaces → Assignments y que pase tráfico. Valida el supuesto central antes
-de escribir PHP.
+**Fase 1 — Data plane a mano. ✅ Validada el 13-08-2026.**
+`spike/fase1-bringup.sh` levanta dos túneles en el mismo firewall hablándose
+por loopback, sin depender de un servidor externo. Resultado sobre pfSense
+2.9.0-BETA:
+
+| | |
+|---|---|
+| Socket UAPI | arriba en 100 ms |
+| `awg setconf` con ofuscación | aceptado |
+| Handshake | 1 segundo |
+| Tráfico por el túnel | ping 0,054 ms de media, 0 % pérdida |
+| Backend | AWG **2.0** — acepta `S3`, `S4`, `I1` |
+
+Tres hallazgos que cambian el diseño y están recogidos abajo: `awg show`
+devuelve los parámetros de ofuscación, `awg --version` no sirve para detectar
+la versión del protocolo, y matar el proceso destruye la interfaz solo.
 
 **Fase 2 — Esqueleto del paquete.** Fork de `wireguard-nativo` con el
 renombrado completo. Que instale, aparezca en el menú, y no rompa nada. Sin
@@ -312,15 +324,32 @@ las referencias tiene y la que hace usable el modo servidor.
 
 ## 11. Riesgos abiertos
 
-- **Performance real de `amneziawg-go`** en el hardware objetivo. No medido.
-  Se asume suficiente para enlaces WAN típicos, pero conviene medirlo en la
-  fase 1 antes de comprometerse.
+- **Performance real de `amneziawg-go`** en el hardware objetivo. Sigue sin
+  medirse: la fase 1 validó latencia (0,054 ms por loopback) pero no
+  throughput, que necesita un enlace real. Medirlo antes de la fase 6.
 - **Estabilidad de los procesos go a largo plazo.** El watchdog de la fase 5
   existe justamente porque el plugin de OPNsense consideró necesario tenerlo.
-- **Detección de versión del backend** (AWG 1.x vs 2.0) para decidir qué campos
-  escribir. Sin resolver: hay que ver si `awg --version` alcanza.
 - **Duplicación de mantenimiento con wgeasy.** Dos árboles de código con mucha
   lógica común. Evaluar en la fase 6 si conviene extraer lo compartido.
+
+### Resueltos en la fase 1
+
+- **Detección de versión del backend.** `awg --version` **no sirve**: reporta
+  `v1.0.20250521` cuando el paquete instalado es `amnezia-tools-1.0.20250903`,
+  y `amneziawg-go` dice `0.0.20250522` siendo el paquete `0.2.16_7`. Las
+  versiones que reportan los binarios no tienen relación con las del paquete.
+  El método confiable es la **sonda empírica**: intentar un `setconf` con
+  `S3`/`S4` y ver si lo acepta. El paquete debería hacerlo una vez al instalar
+  y cachear el resultado.
+
+- **Lectura del estado.** `awg show <if>` devuelve los parámetros de ofuscación
+  ya aplicados (`jc`, `jmin`, `jmax`, `s1`, `s2`, `h1`–`h4`), no solo el
+  estado del peer. La página de estado puede leerlos de ahí en vez de
+  reconstruirlos desde el `.conf`.
+
+- **Destrucción de interfaz.** Matar el proceso `amneziawg-go` destruye la
+  interfaz `tun` sola; no hace falta `ifconfig destroy`. Simplifica el
+  supervisor de la fase 4.
 
 ---
 
