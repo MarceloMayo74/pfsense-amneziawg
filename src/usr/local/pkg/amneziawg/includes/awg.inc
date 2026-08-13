@@ -587,7 +587,7 @@ function awg_destroy_rogue_tunnels(&$cmds = null) {
 	$rogue_tunnels = array_diff($running_ifs, $config_ifs);
 
 	foreach ($rogue_tunnels as $tunnel) {
-		$res &= awg_ifconfig_if_destroy($tunnel, $cmds);
+		$res &= awg_if_destroy($tunnel, $cmds);
 	}
 
 	return $res;
@@ -673,7 +673,7 @@ function awg_tunnel_sync_by_name($tunnel_name, $json = false) {
 		$state = (isset($tunnel['enabled']) && $tunnel['enabled'] == 'yes');
 
 		// Create the tunnel interface if it does not yet exist
-		if (awg_ifconfig_if_create($tunnel['name'], $cmds)) {
+		if (awg_if_create($tunnel['name'], $cmds)) {
 			// Add the tunnel interface to the AmneziaWG interface group
 			awg_interface_update_groups($tunnel['name'], $cmds);
 
@@ -753,8 +753,12 @@ function awg_resync() {
 	if (awg_is_service_running()) {
 		// Go ahead and resolve DNS when we call package resync
 		awg_resolve_endpoints();
-	} elseif (is_module_loaded($awgg['kmod'])) {
-		// We don't want active tunnels when the service isn't running
+	} elseif (!empty(awg_get_running_ifs())) {
+		/*
+		 * No queremos tuneles activos con el servicio parado. La guarda era
+		 * antes 'esta cargado el modulo?', que con el data plane en userspace
+		 * no significa nada: ahora se pregunta si quedo algun tunel corriendo.
+		 */
 		awg_destroy_tunnels();
 	}
 

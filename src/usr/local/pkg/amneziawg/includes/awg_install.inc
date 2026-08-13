@@ -232,13 +232,14 @@ function awg_destroy_tunnels(&$cmds = null) {
 
 	// Tear down interfaces
 	foreach (awg_get_running_ifs() as $tunnel) {
-		$res &= awg_ifconfig_if_destroy($tunnel, $cmds);
+		$res &= awg_if_destroy($tunnel, $cmds);
 	}
 
-	// Now attempt to unload the module if the above was successful
-	if ($res) {
-		$res &= awg_kld_loadunload(false, $cmds);
-	}
+	/*
+	 * En el paquete de WireGuard aca se descargaba el modulo de kernel. Con
+	 * el data plane en userspace no queda nada global que liberar: bajar cada
+	 * tunel ya mato su proceso y se llevo su interfaz.
+	 */
 
 	return $res;
 }

@@ -1,7 +1,9 @@
 <?php
-/* TODO FASE 2 - reescribir a mano: supervisor de N procesos go
- * Este archivo salio del renombrado mecanico y todavia asume el modelo de
- * WireGuard con modulo de kernel. Ver docs/arquitectura.md
+/* TODO FASE 4 - supervision
+ * Ya no queda nada del modelo de kernel, pero este daemon sigue haciendo solo
+ * lo que hacia en WireGuard: reresolver los endpoints por DNS. Le falta
+ * supervisar los procesos amneziawg-go -- arranque al boot, parada ordenada y
+ * reinicio de un tunel sin tocar los otros. Ver docs/arquitectura.md, fase 4.
  */
 /*
  * awg_service.inc
@@ -346,16 +348,27 @@ function awg_service_daemon() {
 	// Now that we are properly daemonized, register the service signal handlers
 	awg_register_daemon_sig_handler();
 
-	// Attempt to load the kmod, required to run the service without any tunnels configured
-	awg_kld_loadunload(true);
+	/*
+	 * El paquete de WireGuard cargaba aca el modulo de kernel, para poder
+	 * arrancar el servicio sin ningun tunel configurado. Sin modulo no hay
+	 * nada que preparar: cada tunel trae su propio proceso cuando se levanta.
+	 */
 
 	// Now we resolve endpoint hostnames here...
 	$last_update_time = awg_resolve_endpoints();
 
 	// Main AmneziaWG service loop
 	while (true) {
-		// The whole point of this daemon...
-		if (!is_module_loaded($awgg['kmod'])) {
+		/*
+		 * Condicion de salida. El paquete de WireGuard preguntaba si el modulo
+		 * seguia cargado: era su unico recurso global, y si desaparecia el
+		 * daemon no tenia nada que hacer. Aca no hay recurso global, asi que
+		 * la pregunta equivalente es si el paquete sigue habilitado.
+		 *
+		 * La salida normal igual es por SIGTERM, que maneja el signal handler
+		 * registrado mas arriba; esto es la red de seguridad.
+		 */
+		if (!awg_is_service_enabled()) {
 			break;
 		}
 

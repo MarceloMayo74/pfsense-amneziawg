@@ -1,8 +1,4 @@
 <?php
-/* TODO FASE 2 - reescribir a mano: crear interfaz = spawn de amneziawg-go
- * Este archivo salio del renombrado mecanico y todavia asume el modelo de
- * WireGuard con modulo de kernel. Ver docs/arquitectura.md
- */
 /*
  * awg_api.inc
  *
@@ -186,28 +182,148 @@ function awg_interface_in_group($if_name, $group = null) {
 	return $res;
 }
 
-function awg_kld_loadunload($load = true, &$cmds = null) {
+/*
+ * El data plane es userspace: cada tunel es un proceso amneziawg-go. Lo que
+ * en el paquete de WireGuard era cargar y descargar if_wg, aca es levantar y
+ * bajar procesos, uno por tunel.
+ */
+
+/*
+ * Ruta del socket de control (UAPI) que publica amneziawg-go para un tunel.
+ * awg(8) habla con el proceso por ahi en lugar de con el kernel.
+ */
+function awg_uapi_sock($if_name) {
+	global $awgg;
+
+	return "{$awgg['sock_path']}/{$if_name}.sock";
+}
+
+function awg_proc_pidfile($if_name) {
+	global $awgg;
+
+	return "{$awgg['run_path']}/{$if_name}.pid";
+}
+
+function awg_proc_logfile($if_name) {
+	global $awgg;
+
+	return "{$awgg['run_path']}/{$if_name}.log";
+}
+
+/*
+ * Un tunel esta corriendo si su socket de control existe. Es mejor senal que
+ * mirar la tabla de procesos: el socket es justo lo que awg(8) necesita, asi
+ * que si esta, el tunel es utilizable.
+ */
+function awg_proc_is_running($if_name) {
+	return file_exists(awg_uapi_sock($if_name));
+}
+
+/*
+ * Espera a que aparezca el socket de control. amneziawg-go tarda un momento
+ * en publicarlo despues de arrancar, y sin esta espera el setconf que viene
+ * despues falla. Devuelve los microsegundos esperados, o false si no aparecio.
+ */
+function awg_uapi_wait($if_name, $timeout_us = 5000000) {
+	$interval = 100000;
+	$waited = 0;
+
+	while ($waited < $timeout_us) {
+		if (awg_proc_is_running($if_name)) {
+			return $waited;
+		}
+
+		usleep($interval);
+		$waited += $interval;
+	}
+
+	return false;
+}
+
+/*
+ * Levanta el proceso de un tunel.
+ *
+ * daemon(8) va SIN -f a proposito: ese flag manda stdio del hijo a /dev/null,
+ * no significa "forkear" (daemon se separa de la terminal igual, sin flags).
+ * Con -f se pierden todos los logs y crashes de amneziawg-go, que son lo unico
+ * que hay para diagnosticar cuando un tunel no levanta.
+ */
+function awg_proc_start($if_name, &$cmds = null) {
 	global $awgg;
 
 	$s = fn($x) => $x;
 
-	$ret_code = 0;
-
-	$kmod = $awgg['kmod'];
-
-	// Determine which binary to use
-	$kldbin = $load ? $awgg['kldload'] : $awgg['kldunload'];
-
-	$error = $load ? AWG_ERROR_KLD_LOAD : AWG_ERROR_KLD_UNLOAD;
-
-	if (($load && !is_module_loaded($kmod))
-	    || (!$load && is_module_loaded($kmod))) {
-		$cmd = "{$kldbin} {$s(escapeshellarg($kmod))} 2>&1";
-		$cmds[] = $res = awg_exec($cmd, 'kld', $error);
-		$ret_code = $res['ret_code'];
+	if (awg_proc_is_running($if_name)) {
+		return true;
 	}
 
-	return ($ret_code == 0);
+	safe_mkdir($awgg['run_path'], 0700);
+
+	$cmd = "{$awgg['daemon']} -p {$s(escapeshellarg(awg_proc_pidfile($if_name)))} " .
+	       "{$s(escapeshellarg($awgg['awg_go']))} {$s(escapeshellarg($if_name))} " .
+	       ">> {$s(escapeshellarg(awg_proc_logfile($if_name)))} 2>&1";
+
+	$cmds[] = $res = awg_exec($cmd, 'process', AWG_ERROR_PROC_START);
+
+	if ($res['ret_code'] <> 0) {
+		return false;
+	}
+
+	if (awg_uapi_wait($if_name) === false) {
+		$cmds[] = array(
+			'cmd'		=> $cmd,
+			'output'	=> array(sprintf(gettext('See %s'), awg_proc_logfile($if_name))),
+			'ret_code'	=> AWG_ERROR_PROC_UAPI,
+			'errors'	=> awg_get_errors('process', AWG_ERROR_PROC_UAPI));
+
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Baja el proceso de un tunel.
+ *
+ * No hace falta destruir la interfaz aparte: cuando muere amneziawg-go, el tun
+ * se va con el. Se intenta primero por pidfile y se cae a buscar por linea de
+ * comandos, que lleva el nombre de la interfaz y por eso no puede matar otro
+ * tunel por accidente.
+ */
+function awg_proc_stop($if_name, &$cmds = null) {
+	global $awgg;
+
+	$s = fn($x) => $x;
+
+	if (!awg_proc_is_running($if_name)) {
+		return true;
+	}
+
+	$pidfile = awg_proc_pidfile($if_name);
+
+	if (file_exists($pidfile)) {
+		killbypid($pidfile);
+	} else {
+		$cmd = "/bin/pkill -f {$s(escapeshellarg("{$awgg['awg_go']} {$if_name}"))} 2>&1";
+		$cmds[] = awg_exec($cmd, 'process', AWG_ERROR_PROC_STOP);
+	}
+
+	// Darle un momento a que se retire y limpie su socket.
+	for ($i = 0; $i < 20 && awg_proc_is_running($if_name); $i++) {
+		usleep(100000);
+	}
+
+	// Si quedo el socket colgado, el proceso ya no esta para borrarlo.
+	if (!awg_proc_is_running($if_name)) {
+		unlink_if_exists($pidfile);
+
+		return true;
+	}
+
+	unlink_if_exists(awg_uapi_sock($if_name));
+	unlink_if_exists($pidfile);
+
+	return false;
 }
 
 function awg_ifconfig_if_updown($if_name, $up = true, &$cmds = null) {
@@ -382,22 +498,19 @@ function awg_awg_if_sync($if_name, &$cmds = null) {
 }
 
 /*
-* This creates a AmneziaWG interface of a specified name
-*/
-function awg_ifconfig_if_create($if_name, &$cmds = null) {
-	global $awgg;
-
-	$s = fn($x) => $x;
-
-	$ret_code = 0;
-
-	if (!awg_is_valid_tunnel($if_name, true)) {
-		$cmd = "{$awgg['ifconfig']} wg create name {$s(escapeshellarg($if_name))} 2>&1";
-		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_CREATE);
-		$ret_code = $res['ret_code'];
+ * Crea la interfaz de un tunel.
+ *
+ * En el paquete de WireGuard esto era 'ifconfig wg create', porque el cloner
+ * lo aportaba el modulo de kernel. Aca no hay modulo: la interfaz la crea el
+ * propio amneziawg-go al arrancar, asi que crear el tunel es levantar su
+ * proceso. Ver docs/arquitectura.md, seccion 2.
+ */
+function awg_if_create($if_name, &$cmds = null) {
+	if (awg_is_valid_tunnel($if_name, true)) {
+		return true;
 	}
 
-	return ($ret_code == 0);
+	return awg_proc_start($if_name, $cmds);
 }
 
 function awg_exec($cmd, $error_type = null, $error_flag = 1) {
@@ -429,22 +542,30 @@ function awg_get_errors($type, $ret_code) {
 }
 
 /*
-* This destroys a AmneziaWG interface of a specified name
-*/
-function awg_ifconfig_if_destroy($if_name, &$cmds = null) {
+ * Destruye la interfaz de un tunel.
+ *
+ * Basta con bajar el proceso: al morir amneziawg-go el tun desaparece solo,
+ * sin necesidad de 'ifconfig destroy'.
+ */
+function awg_if_destroy($if_name, &$cmds = null) {
 	global $awgg;
 
 	$s = fn($x) => $x;
 
-	$ret_code = 0;
-
-	if (awg_is_valid_tunnel($if_name, true)) {
-		$cmd = "{$awgg['ifconfig']} {$s(escapeshellarg($if_name))} destroy 2>&1";
-		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
-		$ret_code = $res['ret_code'];
+	if (!awg_proc_stop($if_name, $cmds)) {
+		return false;
 	}
 
-	return ($ret_code == 0);
+	// Red de seguridad: si por lo que sea la interfaz sobrevivio al proceso,
+	// se la saca a mano para no dejar una huerfana ocupando el nombre.
+	if (does_interface_exist($if_name)) {
+		$cmd = "{$awgg['ifconfig']} {$s(escapeshellarg($if_name))} destroy 2>&1";
+		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
+
+		return ($res['ret_code'] == 0);
+	}
+
+	return true;
 }
 
 function awg_gateways_set_enable($enable = true, $filter_configure = true) {
@@ -734,16 +855,27 @@ function awg_tunnel_get_array_idx($tunnel_name) {
 	return -1;
 }
 
-// Return the next available AmneziaWG interface
+/*
+ * Devuelve el proximo nombre de interfaz libre, dentro de tun9000..tun9999.
+ *
+ * Tiene que ser un nombre tunN de los que pfSense ya reconoce: con un nombre
+ * propio (tun_awg0) la interfaz no aparece en Interfaces > Assignments y no se
+ * puede asignar. El rango alto deja lugar a OpenVPN, que arranca desde abajo,
+ * pero igual se verifica contra el sistema y no solo contra la configuracion
+ * propia, por si algo mas ya tomo el nombre.
+ */
 function next_awg_if() {
 	global $awgg;
 
 	awg_globals();
 
-	for ($ifnum = 0; $ifnum < $awgg['max_tunnels']; $ifnum++) {
+	$configured = awg_get_configured_ifs();
+
+	for ($ifnum = $awgg['if_range_min']; $ifnum <= $awgg['if_range_max']; $ifnum++) {
 		$want_if = "{$awgg['if_prefix']}{$ifnum}";
 
-		if (!in_array($want_if, awg_get_configured_ifs())) {
+		if (!in_array($want_if, $configured)
+		    && !does_interface_exist($want_if)) {
 			return $want_if;
 		}
 	}
