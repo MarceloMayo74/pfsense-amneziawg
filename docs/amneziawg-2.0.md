@@ -116,6 +116,46 @@ campos `I2`–`I5` **vacíos**. El paquete es inmune por construcción, porque
    archivo del cliente sale de `awg_obfuscation_pairs()`, la misma función que
    escribe el del servidor, así que hay que volver a bajarlo o re-escanear el QR.
 
-El backend detecta solo si acepta 2.0 (`awg_backend_supports_awg2()`, sonda
-empírica cacheada en tmpfs). Si dijera que no, los campos 2.0 no se escriben en
-ningún lado y el túnel sigue andando en 1.x.
+El backend detecta solo hasta qué nivel llega (`awg_backend_version()`, sonda
+empírica cacheada en tmpfs) y el selector del túnel no ofrece más que eso. Lo
+que quede por encima del nivel elegido no se escribe en ningún lado, y el túnel
+sigue andando en el nivel de abajo.
+
+## Cómo se ve 2.0 en el cable
+
+Medido el 14-08-2026 con `tcpdump` en la WAN, contra un teléfono Android
+conectado y pasando tráfico. La predicción se hizo **antes** de capturar,
+sumando los tamaños de las plantillas del túnel, y salió exacta.
+
+El túnel tenía `Jc = 3`, `Jmin = 85`, `Jmax = 112`, `S1 = 34`, `S2 = 44` y estos
+cinco `I`, sorteados por el paquete:
+
+```
+I1 = <b 0xe5505d21><rc 15>          I2 = <b 0xa69a><r 14>
+I3 = <b 0x70c3d5512325><rd 7>       I4 = <b 0x1f5d><r 15><rc 7>
+I5 = <b 0x7d420dff2d68><rd 5><r 12>
+```
+
+Lo que salió en el cable, todo del cliente al servidor, en 17 milisegundos:
+
+| paquete | bytes | de dónde sale ese número |
+|---|---|---|
+| `I1` | 19 | 4 de `<b>` + 15 de `<rc 15>` |
+| `I2` | 16 | 2 + 14 |
+| `I3` | 13 | 6 + 7 |
+| `I4` | 24 | 2 + 15 + 7 |
+| `I5` | 23 | 6 + 5 + 12 |
+| basura ×3 | 95, 101, 95 | `Jc = 3` paquetes entre `Jmin` y `Jmax` |
+| handshake init | 182 | 148 del init + `S1` = 34 |
+| response | 136 | 92 del response + `S2` = 44 |
+
+Tres cosas que deja claras esta captura, y que no se ven de otra manera:
+
+- **Los `I` van primero, en orden, y solo del que inicia.** El servidor no
+  contesta ninguno, que es lo que dice el código: `ipackets` solo aparece en
+  `send.go`.
+- **El tamaño de cada `I` es su plantilla**, así que el `.conf` del cliente y lo
+  que emite el teléfono son la misma cosa. Es la forma más directa de comprobar
+  que el archivo entregado es el que está corriendo.
+- **`S4 = 0` se nota por lo que no está**: los paquetes de datos salen en
+  tamaños limpios, sin relleno agregado.
