@@ -194,8 +194,9 @@ function awg_service_cli_start($serialize = true) {
 
 	$s = fn($x) => $x;
 
-	// Set the process name
-	cli_set_process_title('AmneziaWG service');
+	// Set the process name. Es tambien como se lo reconoce despues: ver
+	// awg_is_service_running()
+	cli_set_process_title($awgg['service_title']);
 
 	$ret_code = 0;
 
@@ -248,6 +249,14 @@ function awg_service_cli_start($serialize = true) {
 		unmute_kernel_msgs();
 
 		fwrite(STDERR, "{$s(gettext('done.'))}\n");
+
+		/*
+		 * En el arranque la cosa termina aca: los tuneles quedan levantados y
+		 * el demonio lo arranca rc.start_packages una vez terminado el boot.
+		 * Este proceso esta por morirse, asi que se lleva su pidfile en lugar
+		 * de dejarlo apuntando a un PID que ya no va a existir.
+		 */
+		awg_deregister_service_env();
 
 		return $ret_code;
 	}
@@ -417,16 +426,20 @@ function awg_watchdog() {
 	 * Un solo watchdog a la vez. Levantar un tunel puede tardar hasta cinco
 	 * segundos esperando el socket, asi que con varios caidos una corrida se
 	 * puede pasar del intervalo del cron y pisarse con la siguiente.
+	 *
+	 * El lock es el PID de la corrida en curso, no un flock sobre el archivo:
+	 * el flock se lo llevaba el primer amneziawg-go que el watchdog levantara
+	 * -- hereda el descriptor y no se muere nunca -- y a partir de ahi todas
+	 * las corridas siguientes se encontraban el lock tomado y se volvian sin
+	 * hacer nada. Ver awg_is_service_running().
 	 */
-	if (!($h_lock = @fopen($awgg['watchdog_lock'], 'a+'))) {
+	if (awg_pidfile_process_running($awgg['watchdog_lock'], $awgg['watchdog_pattern'])) {
 		return 0;
 	}
 
-	if (!flock($h_lock, LOCK_EX | LOCK_NB)) {
-		fclose($h_lock);
+	safe_mkdir($awgg['run_path'], 0700);
 
-		return 0;
-	}
+	@file_put_contents($awgg['watchdog_lock'], getmypid());
 
 	$state = awg_watchdog_state_get();
 
@@ -475,9 +488,7 @@ function awg_watchdog() {
 
 	awg_watchdog_state_put($state);
 
-	flock($h_lock, LOCK_UN);
-
-	fclose($h_lock);
+	unlink_if_exists($awgg['watchdog_lock']);
 
 	return 0;
 }
@@ -568,32 +579,23 @@ function awg_watchdog_cron_deinstall() {
 }
 
 function awg_deregister_service_env() {
-	global $h_lock, $awgg;
-
-	if (!is_null($h_lock)) {
-		// Attempt to release exclusive lock
-		@flock($h_lock, LOCK_UN);
-
-		// Attempt to close file handler
-		@fclose($h_lock);
-	}
+	global $awgg;
 
 	// Attempt to delete PID file
 	unlink_if_exists($awgg['pid_path']);
 }
 
+/*
+ * El pidfile se escribe y se cierra en el acto. Ningun descriptor queda abierto
+ * a proposito: todo lo que este abierto cuando se levante un tunel se lo lleva
+ * amneziawg-go, que vive mas que el servicio. Ver awg_is_service_running().
+ */
 function awg_register_service_env($close_fdio = false) {
-	global $h_lock, $awgg;
+	global $awgg;
 
 	awg_deregister_service_env();
 
-	if ($h_lock = fopen($awgg['pid_path'], 'a+')) {
-		flock($h_lock, LOCK_EX);
-		ftruncate($h_lock, 0);
-		fseek($h_lock, 0, 0);
-		fwrite($h_lock, getmypid());
-		fflush($h_lock);
-	}
+	@file_put_contents($awgg['pid_path'], getmypid());
 
 	if ($close_fdio) {
 		fclose(STDIN);
@@ -659,28 +661,55 @@ function awg_is_cli() {
 	return (PHP_SAPI === 'cli');
 }
 
-// Checks if the service is running
-function awg_is_service_running() {
-	global $awgg;
+/*
+ * Si el proceso anotado en un pidfile sigue vivo, y sigue siendo el que lo
+ * escribio.
+ *
+ * El PID solo no alcanza: FreeBSD los recicla, y un pidfile que quedo colgado
+ * puede terminar apuntando a un proceso ajeno. El patron -- un pedazo de la
+ * linea de comandos con la que el proceso se registro -- es lo que separa
+ * "todavia corre" de "ese numero ahora es de otro".
+ */
+function awg_pidfile_process_running($pid_path, $pattern) {
+	$pid = trim((string) @file_get_contents($pid_path));
 
-	if (!($h_lock = @fopen($awgg['pid_path'], 'r')) || !file_exists($awgg['pid_path'])) {
+	if (!ctype_digit($pid)) {
 		return false;
 	}
 
-	$not_running = flock($h_lock, LOCK_EX | LOCK_NB, $wouldblock);
+	/*
+	 * ps y no pgrep: pgrep se saltea a si mismo y a todos sus ancestros, y aca
+	 * el que pregunta suele ser justamente el proceso por el que pregunta -- el
+	 * servicio se busca a si mismo apenas arranca, antes de construir los
+	 * tuneles. Con pgrep esa pregunta se contesta que no, siempre.
+	 *
+	 * -ww para que la linea no salga cortada: el patron del watchdog esta al
+	 * final de una linea de comandos larga.
+	 */
+	exec('/bin/ps -ww -p ' . escapeshellarg($pid) . ' -o command= 2>/dev/null', $out, $ret_code);
 
-	if ($not_running) {
-		flock($h_lock, LOCK_UN);
-	}
+	return (($ret_code == 0) && (strpos(implode('', $out), $pattern) !== false));
+}
 
-	$pid = fgets($h_lock);
+/*
+ * Si el servicio esta corriendo. La respuesta sale del PID, no de un flock.
+ *
+ * El paquete de WireGuard contesta esto dejando el pidfile abierto con un flock
+ * exclusivo puesto mientras el servicio vive: si el lock esta tomado, el
+ * servicio corre. Eso vale mientras el servicio no arranque nada que le
+ * sobreviva, y aca arranca uno por tunel. amneziawg-go hereda los descriptores
+ * del proceso que lo lanza, y con el descriptor se lleva el flock; el proceso
+ * del tunel queda vivo indefinidamente sosteniendo el lock del servicio que lo
+ * creo. Despues de un arranque el pidfile contestaba "corriendo" para siempre,
+ * el demonio no volvia a levantar ni a mano, y el que apagaba la GUI era el
+ * chequeo de pfSense, que mira el proceso y veia la verdad: no habia ninguno.
+ *
+ * El PID no se hereda.
+ */
+function awg_is_service_running() {
+	global $awgg;
 
-	fclose($h_lock);
-
-	// Another trick to test if a process is running
-	$sig_test = posix_kill($pid, 0);
-
-	return (!$not_running || $wouldblock || $sig_test);
+	return awg_pidfile_process_running($awgg['pid_path'], $awgg['service_title']);
 }
 
 ?>

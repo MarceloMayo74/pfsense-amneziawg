@@ -74,6 +74,7 @@ $awgg = array(
 	'awg_pkg_root'		=> '/usr/local/pkg/amneziawg',
 	'subsystem_prefix'	=> 'amneziawg',
 	'service_name'		=> 'amneziawgd',
+	'service_title'		=> 'AmneziaWG service',
 	'nrb'			=> '-NoReMoTeBaCkUp',
 	'applylist'		=> array(
 					'tunnels' => "{$g['tmp_path']}/.amneziawg_tunnel.apply"),
@@ -334,6 +335,7 @@ $awgg['awg_daemon'] 		= "{$awgg['php_awg']} -f {$awgg['awg_includes']}/awg_servi
  * cron. Corre y termina: no es un proceso mas que despues habria que vigilar.
  */
 $awgg['watchdog_cmd']		= "{$awgg['awg_daemon']} watchdog";
+$awgg['watchdog_pattern']	= "{$awgg['awg_includes']}/awg_service.inc watchdog";
 $awgg['watchdog_state']		= "{$awgg['run_path']}/watchdog.state";
 $awgg['watchdog_lock']		= "{$awgg['run_path']}/watchdog.lock";
 
