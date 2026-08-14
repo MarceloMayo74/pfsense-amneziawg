@@ -476,12 +476,18 @@ $section->addInput(new Form_StaticText(
  * el que quiera cambiarlos, y para los tuneles viejos que se crearon con los
  * valores de fabrica que este paquete traia antes.
  */
+/*
+ * La clase de color va explicita: Form_Button agrega btn-primary solo en la
+ * rama SIN icono. Con icono el boton sale con 'btn' pelado, que en este tema
+ * pinta el texto del color del fondo -- se lee solo al pasarle el mouse por
+ * encima.
+ */
 $section->addInput(new Form_Button(
 	'genobf',
 	'Randomise',
 	null,
 	'fa-solid fa-dice'
-))->addClass('btn-sm')
+))->addClass('btn-primary btn-sm')
   ->setHelp('Draws a fresh set for the level selected above. New tunnels arrive already randomised: the values that matter here are the ones nobody else is using, so a value shipped with the package would be a signature of its own. It does not touch the junk payloads below.');
 
 // Paquetes basura antes del handshake
@@ -635,7 +641,7 @@ if ($awg2) {
 		'Randomise payloads',
 		null,
 		'fa-solid fa-dice'
-	))->addClass('btn-sm')
+	))->addClass('btn-primary btn-sm')
 	  ->setHelp('Fills the five with freshly drawn templates. There is no factory template and there will not be one: the same bytes leaving every installation of this package would be a better signature than the one being hidden. For the same reason the examples in Amnezia\'s documentation are not used — they are published.');
 }
 
