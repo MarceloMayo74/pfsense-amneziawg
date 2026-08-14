@@ -147,6 +147,20 @@ if ($files.Count -eq 0) { throw "src/ is empty. Run tools/fork-from-wireguard.sh
 $files['/usr/local/bin/amneziawg-go'] = $goBin
 $files['/usr/local/bin/awg']          = $awgBin
 
+# The licence texts are not in src/ either: their install path carries the
+# version, so it can only be built here. They are not decoration -- awg is
+# GPLv2, and section 1 of that licence requires its text to travel with the
+# binary. NOTICE says which of the four licences covers which part, and where
+# the corresponding source of the GPLv2 one is.
+$licenseDir = "/usr/local/share/licenses/$name-$version"
+$licenseFiles = [ordered]@{
+    "$licenseDir/APACHE20" = Join-Path $root 'licenses\APACHE20'
+    "$licenseDir/GPLv2"    = Join-Path $root 'licenses\GPLv2'
+    "$licenseDir/MIT"      = Join-Path $root 'licenses\MIT'
+    "$licenseDir/NOTICE"   = Join-Path $root 'NOTICE'
+}
+foreach ($entry in $licenseFiles.GetEnumerator()) { $files[$entry.Key] = $entry.Value }
+
 # Only these get executable mode and skip text normalisation.
 $binaryPaths = @('/usr/local/bin/amneziawg-go', '/usr/local/bin/awg')
 
@@ -159,7 +173,10 @@ foreach ($entry in $files.GetEnumerator()) {
     $dstFile = Join-Path $stage ($entry.Key.TrimStart('/') -replace '/', '\')
     New-Item -ItemType Directory -Force -Path (Split-Path $dstFile -Parent) | Out-Null
 
-    $isText = ($textExt -contains [System.IO.Path]::GetExtension($srcFile)) -and
+    # The licence texts have no extension, so they are named explicitly rather
+    # than matched: they are text and have to land with LF like everything else.
+    $isText = (($textExt -contains [System.IO.Path]::GetExtension($srcFile)) -or
+               ($licenseFiles.Contains($entry.Key))) -and
               ($binaryPaths -notcontains $entry.Key)
 
     if ($isText) {
@@ -210,6 +227,7 @@ $dirMap = [ordered]@{
     '/usr/local/share/pfSense-pkg-AmneziaWG'  = 'y'
     '/etc/inc/priv'                           = 'y'
     '/etc/inc'                                = 'y'
+    $licenseDir                               = 'y'
 }
 
 $meta = [ordered]@{
@@ -223,8 +241,12 @@ $meta = [ordered]@{
     arch         = $arch
     prefix       = '/'
     flatsize     = $flatsize
-    licenselogic = 'single'
-    licenses     = @('APACHE20')
+    # Three licences, all at once and each over a different part: the package
+    # is Apache 2.0, the bundled awg is GPLv2 and amneziawg-go is MIT. Declaring
+    # only APACHE20 would have been a plain lie in the metadata, which is what
+    # `pkg info -l` and every mirror reads.
+    licenselogic = 'and'
+    licenses     = @('APACHE20', 'GPLv2', 'MIT')
     desc         = 'Adds VPN > AmneziaWG: tunnels and peers managed from the GUI, with the obfuscation parameters that let a WireGuard tunnel survive deep packet inspection. The data plane is amneziawg-go in userspace, so no kernel module is required.'
 }
 

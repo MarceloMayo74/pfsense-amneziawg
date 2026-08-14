@@ -334,7 +334,19 @@ envío por mail. La fase 6 del plan integra esa funcionalidad acá.
 
 ## Licencia
 
-Por definir. Las piezas de terceros que se reusan son Apache 2.0
-(`pfSense-pkg-WireGuard`), MIT (`amneziawg-go`,
-`pfSense-pkg-amneziawg-client`) y GPLv2 (`amnezia-tools`). Si el binario `awg`
-se redistribuye dentro del `.pkg`, hay que ofrecer su código fuente.
+**Apache 2.0.** El árbol salió de `pfSense-pkg-WireGuard`, que es Apache 2.0, y
+cada archivo heredado conserva su encabezado: elegir otra cosa habría dado un
+árbol mezclado. Es además la licencia de los paquetes de pfSense y la del
+proyecto hermano.
+
+Adentro del `.pkg` viajan dos binarios que siguen siendo de sus autores: `awg`
+es **GPLv2** y `amneziawg-go` es **MIT**. Son programas aparte que el paquete
+ejecuta —no se linkea nada—, así que distribuirlos en el mismo archivo es
+agregación y no cambia la licencia de lo demás. Lo que la GPL sí obliga, y está
+hecho: su texto viaja adentro del paquete, y **cada release lleva adjunta la
+fuente exacta del `awg` que distribuye**, que arma
+[`tools/fetch-sources.sh`](tools/fetch-sources.sh).
+
+Qué cubre a qué, pieza por pieza: [NOTICE](NOTICE). El porqué de la elección, la
+cadena verificada del binario a su fuente y el checklist de cada release:
+[docs/licencias.md](docs/licencias.md).

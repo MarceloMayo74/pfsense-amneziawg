@@ -1,0 +1,84 @@
+pfSense-pkg-AmneziaWG
+Copyright (c) 2026 Marcelo Mayo <marcelomayo1974@gmail.com>
+
+This package's own code is licensed under the Apache License, Version 2.0.
+It also ships third-party software under other licences. Each part, and the
+licence it comes under, is listed below. The full texts are next to this file
+(APACHE20, GPLv2, MIT), and in licenses/ in the source repository.
+
+
+1. The package itself -- Apache License 2.0
+-------------------------------------------
+
+Forked from pfSense-pkg-WireGuard, which is Apache 2.0:
+
+    Copyright (c) 2021-2026 Rubicon Communications, LLC (Netgate)
+    Copyright (c) 2021 R. Christian McDonald (https://github.com/rcmcdonald91)
+    Copyright (c) 2020 Ascrod
+
+Every file that came from there keeps its original header. Files written for
+this package carry the same licence.
+
+
+2. /usr/local/bin/awg -- GNU General Public License, version 2
+--------------------------------------------------------------
+
+amneziawg-tools, a fork of wireguard-tools. Distributed unmodified, exactly as
+built by the FreeBSD port net/amnezia-tools 1.0.20250903.
+
+    Copyright (C) 2015-2021 Jason A. Donenfeld <Jason@zx2c4.com>
+    Copyright (C) 2018-2021 WireGuard LLC
+    and the other holders named in the source
+
+It is a separate program: this package executes it, it is not linked into
+anything and nothing here derives from it. Bundling it in the same archive is
+mere aggregation under section 2 of the GPL, which is why the rest of this
+package can be Apache 2.0. What the GPL does require is this notice, the copy
+of the licence next to it, and the corresponding source -- see the end of this
+file.
+
+
+3. /usr/local/bin/amneziawg-go -- MIT
+-------------------------------------
+
+amneziawg-go 0.0.20250522, a fork of wireguard-go. Built from source with the
+FreeBSD sticky-sockets patch that lives in patches/amneziawg-go/ in the source
+repository, which is why `amneziawg-go --version` reports -sticky1.
+
+    Copyright (C) 2017-2025 WireGuard LLC. All Rights Reserved.
+
+
+4. /usr/local/www/awg/js/awg_qrcode.js -- MIT
+---------------------------------------------
+
+Based on qrcode.js by davidshimjs (https://github.com/davidshimjs/qrcodejs),
+reduced to an SVG-only renderer. The file carries the full notice in its
+header.
+
+    Copyright (c) 2012 davidshimjs
+
+
+Corresponding source for the GPLv2 part
+=======================================
+
+The `awg` binary in this package is byte for byte the one from the FreeBSD
+package amnezia-tools-1.0.20250903 for FreeBSD:16:amd64:
+
+    sha256  2ce33abdbdccdb81a4ad08aa763d3783b2997a8973d2366bfc8467647918b7f4
+
+It was built from
+
+    https://github.com/amnezia-vpn/amneziawg-tools, tag v1.0.20250903
+    distfile  amnezia-vpn-amneziawg-tools-v1.0.20250903_GH0.tar.gz
+    sha256    d729a6f54aafcd55b2cbb7324f09ca8f0d2536772970652bf822a271d0c907d7
+
+plus the patches and the build recipe in the FreeBSD ports tree, under
+net/amnezia-tools -- both are part of the corresponding source and both are
+included in the tarball described below.
+
+Every release that bundles this binary is published with that source attached
+to it, as awg-src-1.0.20250903.tar.gz. The script tools/fetch-sources.sh
+rebuilds it and checks it against the hashes above.
+
+If you received this package without that source, write to
+marcelomayo1974@gmail.com and a copy will be sent to you.
