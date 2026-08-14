@@ -158,6 +158,11 @@ $awgg = array(
 	// puesta no cuelgue la pagina.
 	'max_address_probe'			=> 4096,
 
+	// Lo que se le ofrece por defecto a un cliente nuevo: todo el trafico por
+	// el tunel, y keepalive puesto porque casi siempre esta detras de un NAT.
+	'default_allowedips'			=> '0.0.0.0/0, ::/0',
+	'default_keepalive'			=> 25,
+
 	/*
 	 * Watchdog. Cada cuantos minutos corre el cron, y cuanto espera antes de
 	 * reintentar un tunel que no arranca.

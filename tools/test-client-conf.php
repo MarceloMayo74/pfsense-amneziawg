@@ -77,10 +77,18 @@ if (!function_exists('is_ipaddrv4')) {
 	function is_ipaddrv4($v) {
 		return (filter_var($v, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false);
 	}
-	function is_ipaddr($v) { return is_ipaddrv4($v) || (strpos((string) $v, ':') !== false); }
+	function is_ipaddrv6($v) {
+		return (filter_var($v, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false);
+	}
+	function is_ipaddr($v) { return is_ipaddrv4($v) || is_ipaddrv6($v); }
 	function is_subnet($v) {
 		$p = explode('/', (string) $v);
-		return (count($p) === 2) && is_ipaddrv4($p[0]) && ctype_digit($p[1]) && ($p[1] <= 32);
+
+		if ((count($p) !== 2) || !ctype_digit($p[1])) {
+			return false;
+		}
+
+		return is_ipaddrv4($p[0]) ? ($p[1] <= 32) : (is_ipaddrv6($p[0]) && ($p[1] <= 128));
 	}
 	function gen_subnet($ip, $bits) {
 		return long2ip(ip2long($ip) & (($bits == 0) ? 0 : (-1 << (32 - $bits))));
@@ -96,6 +104,10 @@ eval(extract_function("{$src}/awg_api.inc", 'awg_obfuscation_pairs'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_build_conf'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_conf_filename'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_pick_address'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_parse_addresses'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_post'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_line'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_format_endpoint'));
 
 $pass = $fail = 0;
 
@@ -335,6 +347,76 @@ $el = microtime(true) - $t0;
 
 check('una subred grande corta por el tope de sondeos', $grande === null, (string) $grande);
 check('y corta rapido', $el < 5.0, sprintf('%.1fs', $el));
+
+printf("\n-- direcciones: parseo y vuelta --\n\n");
+
+$e = array();
+$filas = awg_client_parse_addresses('10.0.0.2/32, 192.168.1.0/24', $e);
+
+check('parsea una lista separada por comas',
+	count($filas) === 2 && empty($e), count($filas) . ' ' . implode(';', $e));
+
+check('y la devuelve igual', awg_client_addresses_to_line($filas) === '10.0.0.2/32, 192.168.1.0/24',
+	awg_client_addresses_to_line($filas));
+
+$e = array();
+$sueltas = awg_client_parse_addresses('10.0.0.2', $e);
+
+check('una direccion sola es un host /32',
+	($sueltas[0]['mask'] ?? '') === '32', $sueltas[0]['mask'] ?? '(nada)');
+
+$e = array();
+$v6 = awg_client_parse_addresses('fd00::2', $e);
+
+check('y una IPv6 sola es /128',
+	($v6[0]['mask'] ?? '') === '128', $v6[0]['mask'] ?? '(nada)');
+
+$e = array();
+check('aguanta espacios de mas',
+	count(awg_client_parse_addresses('  10.0.0.2/32 ,  10.0.0.3/32  ', $e)) === 2 && empty($e));
+
+$e = array();
+check('saltea las entradas vacias',
+	count(awg_client_parse_addresses('10.0.0.2/32, , 10.0.0.3/32,', $e)) === 2 && empty($e));
+
+$e = array();
+$mala = awg_client_parse_addresses('10.0.0.2/32, no-es-una-ip', $e);
+
+check('avisa de lo que no es una direccion', count($e) === 1, implode(';', $e));
+check('y no la agrega a la lista', count($mala) === 1);
+
+$e = array();
+check('una mascara imposible tambien se rechaza',
+	count(awg_client_parse_addresses('10.0.0.2/99', $e)) === 0 && count($e) === 1);
+
+$e = array();
+check('una lista vacia no es un error',
+	awg_client_parse_addresses('', $e) === array() && empty($e));
+
+$post = awg_client_addresses_to_post($filas, 'cliente');
+
+check('arma los campos repetibles que espera el guardado nativo',
+	($post['address0'] === '10.0.0.2') && ($post['address_subnet0'] === '32')
+	&& ($post['address1'] === '192.168.1.0') && ($post['address_subnet1'] === '24')
+	&& ($post['address_descr0'] === 'cliente'),
+	implode(',', array_keys($post)));
+
+printf("\n-- endpoint --\n\n");
+
+check('junta host y puerto',
+	awg_client_format_endpoint('vpn.example.com', '51820') === 'vpn.example.com:51820');
+
+check('una IPv6 va entre corchetes, o el cliente no distingue el puerto',
+	awg_client_format_endpoint('fd00::1', '51820') === '[fd00::1]:51820',
+	awg_client_format_endpoint('fd00::1', '51820'));
+
+check('y no se le agregan corchetes dos veces',
+	awg_client_format_endpoint('[fd00::1]', '51820') === '[fd00::1]:51820',
+	awg_client_format_endpoint('[fd00::1]', '51820'));
+
+check('sin host no hay endpoint', awg_client_format_endpoint('', '51820') === '');
+check('sin puerto queda el host solo',
+	awg_client_format_endpoint('vpn.example.com', '') === 'vpn.example.com');
 
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 

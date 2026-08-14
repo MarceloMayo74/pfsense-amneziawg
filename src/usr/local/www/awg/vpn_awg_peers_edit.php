@@ -43,6 +43,8 @@ awg_globals();
 
 $pconfig = [];
 $is_new = true;
+$peer_idx = null;
+$tun_name = null;
 
 if (isset($_REQUEST['tun'])) {
 	$tun_name = $_REQUEST['tun'];
@@ -52,50 +54,21 @@ if (isset($_REQUEST['peer']) && is_numericint($_REQUEST['peer'])) {
 	$peer_idx = $_REQUEST['peer'];
 }
 
-// All form save logic is in amneziawg/awg.inc
 if ($_POST) {
 	/*
 	 * El boton de descarga es un submit del mismo formulario, cuyo act es
 	 * 'save'. Se distingue por su propio campo en vez de pisar el act con
 	 * javascript, que dejaria la descarga rota con el js deshabilitado.
 	 */
-	$act = isset($_POST['downloadconf']) ? 'download' : $_POST['act'];
+	$act = isset($_POST['downloadconf']) ? 'download' : ($_POST['act'] ?? '');
 
 	switch ($act) {
 		case 'save':
-			/*
-			 * El par de claves del cliente se resuelve primero: la clave
-			 * publica del peer se deriva de la privada del cliente, y sin eso
-			 * la validacion nativa rechazaria el formulario por Public Key
-			 * vacio antes de que nadie genere nada.
-			 */
-			$client_errors = array();
-			$_POST = awg_client_prepare_post($_POST, $client_errors);
+			// La validacion y el guardado viven en awg_client.inc
+			$res = awg_client_do_peer_post($_POST);
 
-			$res = awg_do_peer_post($_POST);
-			$input_errors = array_merge($client_errors, $res['input_errors']);
+			$input_errors = $res['input_errors'];
 			$pconfig = $res['pconfig'];
-
-			/*
-			 * Los datos del cliente se guardan DESPUES y aparte: asi el camino
-			 * de validacion y sincronizacion del peer, que ya esta probado,
-			 * queda intacto y esto solo agrega un sub-elemento.
-			 */
-			if (empty($input_errors)) {
-				$store = awg_client_store_from_post($_POST, $pconfig['tun'], $input_errors);
-
-				if (empty($input_errors)) {
-					awg_client_save_store($res['peer_idx'], $store);
-				}
-			}
-
-			// Lo tipeado en la seccion de cliente tiene que volver a la
-			// pantalla si algo fallo, y eso no lo devuelve awg_do_peer_post().
-			foreach (array('client_enable', 'client_privatekey', 'client_address',
-			               'client_dns', 'client_mtu', 'client_allowedips',
-			               'client_endpoint', 'client_keepalive') as $field) {
-				$pconfig[$field] = $_POST[$field] ?? '';
-			}
 
 			if (empty($input_errors)) {
 				if (awg_is_service_running() && $res['changes']) {
@@ -104,19 +77,32 @@ if ($_POST) {
 
 					// Add tunnel to the list to apply
 					awg_apply_list_add('tunnels', $res['tuns_to_sync']);
+
+					if ($pconfig['applynow'] == 'yes') {
+						awg_apply_list_apply('tunnels');
+					}
 				}
 
 				// Save was successful
 				header('Location: /awg/vpn_awg_peers.php');
 			}
-			
+
 			break;
+
+		case 'genkeys':
+			// Un par nuevo para el cliente, pedido por ajax
+			print(awg_gen_keypair(true));
+			exit;
 
 		case 'genpsk':
 			// Process ajax call requesting new pre-shared key
 			print(awg_gen_psk());
 			exit;
-			break;
+
+		case 'nextaddr':
+			// La proxima direccion libre del tunel elegido, pedida por ajax
+			print((string) awg_client_next_address($_POST['tun'] ?? ''));
+			exit;
 
 		case 'download':
 			/*
@@ -125,7 +111,7 @@ if ($_POST) {
 			 * en config.xml y una segunda copia en el filesystem solo agregaria
 			 * un lugar mas de donde se puede filtrar.
 			 */
-			$conf = awg_client_conf_from_peer($_POST['index'], $error);
+			$conf = awg_client_conf_from_peer($_POST['index'] ?? '', $error);
 
 			if ($conf === false) {
 				$input_errors[] = $error;
@@ -143,7 +129,6 @@ if ($_POST) {
 
 			print($conf);
 			exit;
-			break;
 
 		default:
 			// Shouldn't be here, so bail out.
@@ -153,42 +138,74 @@ if ($_POST) {
 }
 
 if (is_numericint($peer_idx) && is_array(config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}"))) {
-	// Looks like we are editing an existing peer
-	$pconfig = config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}");
 	$is_new = false;
-} else {
-	// Default to enabled
-	$pconfig['enabled'] = 'yes';
-
-	// Automatically choose a tunnel based on the request
-	$pconfig['tun'] = $tun_name;
-
-	// Default to a dynamic tunnel, so hide the endpoint form group
-	$is_dynamic = true;
 }
 
 /*
- * Estado de la seccion de cliente. Al editar sale de lo guardado en el peer; en
- * uno nuevo, de los valores que sirven para el caso normal -- todo el trafico
- * por el tunel, la proxima direccion libre, y keepalive puesto porque un
- * cliente que anda por ahi casi siempre esta detras de un NAT.
+ * Estado del formulario cuando no viene de un post con errores.
+ *
+ * Un peer existente se lee de la configuracion; uno nuevo arranca con lo que el
+ * tunel puede contestar por si mismo y con lo que se eligio para el cliente
+ * anterior del mismo tunel, que casi siempre es lo que se quiere de nuevo.
  */
 if (!$_POST) {
-	$store = awg_client_store($pconfig);
+	if (!$is_new) {
+		$peer = config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}");
+		$store = awg_client_store($peer);
 
-	$pconfig['client_enable']	= !empty($store['privatekey']) ? 'yes' : '';
-	$pconfig['client_privatekey']	= $store['privatekey'] ?? '';
-	$pconfig['client_dns']		= $store['dns'] ?? '';
-	$pconfig['client_mtu']		= $store['mtu'] ?? '';
-	$pconfig['client_endpoint']	= $store['endpoint'] ?? '';
-	$pconfig['client_address']	= $store['address']
-		?? (string) awg_client_next_address($pconfig['tun']);
-	$pconfig['client_allowedips']	= $store['allowedips'] ?? '0.0.0.0/0, ::/0';
-	$pconfig['client_keepalive']	= $store['persistentkeepalive'] ?? '25';
+		$pconfig['index']		= $peer_idx;
+		$pconfig['enabled']		= $peer['enabled'];
+		$pconfig['tun']			= $peer['tun'];
+		$pconfig['descr']		= $peer['descr'];
+		$pconfig['publickey']		= $peer['publickey'];
+		$pconfig['presharedkey']	= $peer['presharedkey'];
+		$pconfig['address']		= awg_client_addresses_to_line($peer['allowedips']['row'] ?? array());
+
+		$pconfig['client_enable']	= awg_client_is_exportable($peer) ? 'yes' : 'no';
+		$pconfig['privatekey']		= $store['privatekey'] ?? '';
+		$pconfig['dns']			= $store['dns'] ?? '';
+		$pconfig['mtu']			= $store['mtu'] ?? '';
+		$pconfig['routing']		= $store['routing'] ?? 'custom';
+		$pconfig['client_allowedips']	= $store['allowedips'] ?? '';
+		$pconfig['endpoint']		= $store['endpoint'] ?? $peer['endpoint'];
+		$pconfig['port']		= $store['port'] ?? $peer['port'];
+		$pconfig['persistentkeepalive']	= $store['persistentkeepalive'] ?? $peer['persistentkeepalive'];
+	} else {
+		/*
+		 * 'unassigned' encabeza la lista pero no es un tunel: es la opcion de
+		 * dejar el peer sin atar a ninguno. Un peer nuevo tiene que abrir sobre
+		 * el primer tunel de verdad, o todos los valores que se calculan del
+		 * tunel saldrian vacios.
+		 */
+		$tun_list = array_diff_key(awg_get_tun_list(), array('unassigned' => ''));
+
+		$pconfig['tun'] = array_key_exists((string) $tun_name, $tun_list)
+					? $tun_name
+					: (string) array_key_first($tun_list);
+
+		$defaults = awg_client_tunnel_defaults($pconfig['tun']);
+
+		$pconfig['enabled']		= 'yes';
+		$pconfig['client_enable']	= 'yes';
+		$pconfig['descr']		= '';
+		$pconfig['publickey']		= '';
+		$pconfig['presharedkey']	= '';
+		$pconfig['privatekey']		= '';
+		$pconfig['address']		= (string) $defaults['address'];
+		$pconfig['dns']			= (string) $defaults['dns'];
+		$pconfig['mtu']			= (string) $defaults['mtu'];
+		$pconfig['routing']		= $defaults['routing'];
+		$pconfig['client_allowedips']	= $defaults['client_allowedips'];
+		$pconfig['endpoint']		= (string) $defaults['endpoint'];
+		$pconfig['port']		= (string) $defaults['port'];
+		$pconfig['persistentkeepalive']	= (string) $defaults['persistentkeepalive'];
+	}
+
+	$pconfig['applynow'] = 'no';
 }
 
-$client_exportable = !$is_new && awg_client_is_exportable(
-	config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}", array()));
+$client_exportable = !$is_new
+	&& awg_client_is_exportable(config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}", array()));
 
 $shortcut_section = "amneziawg";
 
@@ -219,7 +236,7 @@ $form->addGlobal(new Form_Input(
 	'index',
 	'',
 	'hidden',
-	$peer_idx
+	$pconfig['index'] ?? ''
 ));
 
 $section->addInput(new Form_Checkbox(
@@ -227,44 +244,71 @@ $section->addInput(new Form_Checkbox(
 	'Enable',
 	gettext('Enable Peer'),
 	$pconfig['enabled'] == 'yes'
-))->setHelp('<span class="text-danger">Note: </span>Uncheck this option to disable this peer without removing it from the list.');
+))->setHelp('<span class="text-danger">Note: </span>Uncheck this option to create the peer without enabling it.');
 
-$section->addInput($input = new Form_Select(
+$section->addInput(new Form_Select(
 	'tun',
-	'Tunnel',
+	'*Tunnel',
 	$pconfig['tun'],
 	awg_get_tun_list()
-))->setHelp("AmneziaWG tunnel for this peer. (<a href='vpn_awg_tunnels_edit.php'>Create a New Tunnel</a>)");
+))->setHelp("AmneziaWG tunnel for this peer. Its listen port, MTU and the 16 obfuscation parameters " .
+	    "are taken from it. (<a href='vpn_awg_tunnels_edit.php'>Create a New Tunnel</a>)");
 
 $section->addInput(new Form_Input(
 	'descr',
-	'Description',
+	'*Description',
 	'text',
 	$pconfig['descr'],
 	['placeholder' => 'Description']
-))->setHelp("Peer description for administrative reference (not parsed).");
+))->setHelp('Peer description for administrative reference. It also names the client file, ' .
+	    'keeping the first 15 characters of [a-zA-Z0-9_=+.-].');
 
+/*
+ * El interruptor entre los dos modos de la pagina. Tildado, el firewall arma el
+ * cliente entero y guarda su clave privada. Destildado, esto es la pagina de
+ * peer de siempre: se pega una clave publica y no se guarda nada del otro lado.
+ * Ese segundo modo es el del peer site-to-site y el del cliente que genera sus
+ * propias claves, que es la practica mas segura y no se puede perder.
+ */
 $section->addInput(new Form_Checkbox(
-	'dynamic',
-	'Dynamic Endpoint',
-	gettext('Dynamic'),
-	empty($pconfig['endpoint']) || $is_dynamic
-))->setHelp('<span class="text-danger">Note: </span>Uncheck this option to assign an endpoint address and port for this peer.');
+	'client_enable',
+	'Client',
+	gettext('Generate a client configuration for this peer'),
+	$pconfig['client_enable'] == 'yes'
+))->setHelp('Keeps what is needed to hand this peer a ready to import file, including the obfuscation ' .
+	    'parameters of its tunnel.<br />' .
+	    '<span class="text-danger">Note: </span>this stores the client private key in the firewall ' .
+	    'configuration. Uncheck it to register a peer from a public key you were given, which is the ' .
+	    'safer practice and the only option for a site to site peer.');
 
-$group = new Form_Group('Endpoint');
+$group = new Form_Group('*Endpoint');
 
-// Used for hiding/showing the group via JS
-$group->addClass("endpoint");
+$group->addClass('clientonly');
 
 $group->add(new Form_Input(
 	'endpoint',
 	'Endpoint',
 	'text',
-	$pconfig['endpoint']
+	$pconfig['endpoint'],
+	['placeholder' => 'vpn.example.com']
 ))->addClass('trim')
-  ->setHelp('Hostname, IPv4, or IPv6 address of this peer.<br />
-	     Leave endpoint and port blank if unknown (dynamic endpoints).')
-  ->setWidth(5);
+  ->setHelp('Hostname, IPv4, or IPv6 address of this firewall as reachable by the client. ' .
+	    'Written to the client file and stored on this peer.')
+  ->setWidth(4);
+
+/*
+ * Un select al lado del campo y no un datalist encima: un datalist filtra sus
+ * sugerencias contra lo que ya este escrito, y este campo llega con algo puesto,
+ * asi que el resto de la lista quedaria escondida.
+ */
+$group->add(new Form_Select(
+	'endpoint_detected',
+	'Detected',
+	'',
+	array('' => gettext('Detected on this firewall...'))
+))->setHelp('Dynamic DNS hostnames and interface addresses already configured here. ' .
+	    'Picking one fills the endpoint. (<a href="/services_dyndns.php">' . gettext('Dynamic DNS') . '</a>)')
+  ->setWidth(4);
 
 $group->add(new Form_Input(
 	'port',
@@ -272,9 +316,8 @@ $group->add(new Form_Input(
 	'text',
 	$pconfig['port']
 ))->addClass('trim')
-  ->setHelp("Port used by this peer.<br />
-	     Leave blank for default ({$awgg['default_port']}).")
-  ->setWidth(3);
+  ->setHelp('Listen port of the tunnel. Required: a client rejects an endpoint without one.')
+  ->setWidth(2);
 
 $section->add($group);
 
@@ -285,9 +328,41 @@ $section->addInput(new Form_Input(
 	$pconfig['persistentkeepalive'],
 	['placeholder' => 'Keep Alive']
 ))->addClass('trim')
-  ->setHelp('Interval (in seconds) for Keep Alive packets sent to this peer.<br />
-	     Default is empty (disabled).');
+  ->setHelp('Interval (in seconds) for Keep Alive packets sent by this client.<br />
+	     Recommended for clients behind NAT. Leave blank to disable.');
 
+$group = new Form_Group('*Client Keys');
+
+$group->addClass('clientonly');
+
+$group->add(new Form_Input(
+	'privatekey',
+	'Client Private Key',
+	awg_secret_input_type(),
+	$pconfig['privatekey'],
+	['autocomplete' => 'new-password']
+))->addClass('trim')
+  ->setHelp('Private key for this client, kept with the peer so the file can be handed out again. ' .
+	    '(<a id="copypriv" style="cursor: pointer;" data-success-text="Copied" data-timeout="3000">Copy</a>)');
+
+$group->add(new Form_Button(
+	'genkeys',
+	'Generate',
+	null,
+	'fa-solid fa-key'
+))->addClass('btn-primary btn-sm')
+  ->setHelp('New Key Pair');
+
+$section->add($group);
+
+/*
+ * Un solo campo para la clave publica, no dos.
+ *
+ * Generando es de solo lectura y lo llena el boton de arriba, porque la publica
+ * se deriva de la privada y escribirla a mano solo puede desincronizarlas. En
+ * modo manual es editable y es el unico dato que hay del otro extremo. Alternar
+ * readonly sale mas barato y mas claro que esconder un campo y mostrar otro.
+ */
 $section->addInput(new Form_Input(
 	'publickey',
 	'*Public Key',
@@ -295,7 +370,18 @@ $section->addInput(new Form_Input(
 	$pconfig['publickey'],
 	['placeholder' => 'Public Key', 'autocomplete' => 'new-password']
 ))->addClass('trim')
-  ->setHelp('AmneziaWG public key for this peer.');
+  ->setHelp('Generating a client configuration derives this from the private key above. ' .
+	    'Otherwise, paste here the public key the other side gave you. ' .
+	    '(<a id="copypub" style="cursor: pointer;" data-success-text="Copied" data-timeout="3000">Copy</a>)');
+
+if (!$is_new && ($pconfig['client_enable'] == 'yes') && empty($pconfig['privatekey'])) {
+	$section->addInput(new Form_StaticText(
+		gettext('Note'),
+		gettext('This peer was not created here, so its private key is not on this firewall and no client ' .
+			'file can be produced for it. Generating a new key pair above would re-key the client, and ' .
+			'the old configuration would stop working.')
+	));
+}
 
 $group = new Form_Group('Pre-shared Key');
 
@@ -306,7 +392,8 @@ $group->add(new Form_Input(
 	$pconfig['presharedkey'],
 	['autocomplete' => 'new-password']
 ))->addClass('trim')
-  ->setHelp('Optional pre-shared key for this tunnel. (<a id="copypsk" style="cursor: pointer;" data-success-text="Copied" data-timeout="3000">Copy</a>)');
+  ->setHelp('Optional pre-shared key, written to both this peer and the client file. ' .
+	    '(<a id="copypsk" style="cursor: pointer;" data-success-text="Copied" data-timeout="3000">Copy</a>)');
 
 $group->add(new Form_Button(
 	'genpsk',
@@ -324,154 +411,90 @@ $section = new Form_Section('Address Configuration');
 
 $section->addInput(new Form_StaticText(
 	gettext('Hint'),
-	gettext('Allowed IP entries here will be transformed into proper subnet start boundaries prior to validating and saving. ' .
-	        'These entries must be unique between multiple peers on the same tunnel. Otherwise, traffic to the conflicting ' .
-	        'networks will only be routed to the last peer in the list.')
+	gettext('The address entered here is assigned to the client and saved as the Allowed IPs of this peer. ' .
+		'These entries must be unique between multiple peers on the same tunnel. Otherwise, traffic to the ' .
+		'conflicting networks will only be routed to the last peer in the list.')
 ));
 
-// Init the addresses array if necessary
-if (!is_array($pconfig['allowedips'])
-    || !is_array($pconfig['allowedips']['row'])
-    || empty($pconfig['allowedips']['row'])) {
-		array_init_path($pconfig, 'allowedips/row/0');
-	
-		// Hack to ensure empty lists default to /128 mask
-		$pconfig['allowedips']['row'][0]['mask'] = '128';
-		if (!$is_new) {
-			config_set_path("installedpackages/amneziawg/peers/item/{$peer_idx}/allowedips/row/0/mask", $pconfig['allowedips']['row'][0]['mask']);
-		}
-}
+$group = new Form_Group('*Allowed IPs');
 
-$last = count($pconfig['allowedips']['row']) - 1;
+/*
+ * autocomplete off acá y en Tunneled Networks: se calculan del tunel en cada
+ * render, y un navegador restaurando lo que recuerda de una visita anterior
+ * volveria a poner en pantalla la direccion de una red que ya cambio.
+ */
+$group->add(new Form_Input(
+	'address',
+	'Allowed IPs',
+	'text',
+	$pconfig['address'],
+	['placeholder' => '10.6.0.2/32', 'autocomplete' => 'off']
+))->addClass('trim')
+  ->setHelp('Address assigned to this client, in CIDR notation. Separate multiple addresses with commas.<br />
+	     Written as <code>Address</code> in the client file and as the peer <code>AllowedIPs</code> here.')
+  ->setWidth(5);
 
-foreach ($pconfig['allowedips']['row'] as $counter => $item) {
-	$group = new Form_Group($counter == 0 ? 'Allowed IPs' : null);
-
-	$group->addClass('repeatable');
-
-	$group->add(new Form_IpAddress(
-		"address{$counter}",
-		'Allowed Subnet or Host',
-		$item['address'],
-		'BOTH'
-	))->addClass('trim')
-	  ->setHelp($counter == $last ? 'IPv4 or IPv6 subnet or host reachable via this peer.' : '')
-	  ->addMask("address_subnet{$counter}", $item['mask'], 128, 0)
-	  ->setWidth(4);
-
-	$group->add(new Form_Input(
-		"address_descr{$counter}",
-		'Description',
-		'text',
-		$item['descr']
-	))->setHelp($counter == $last ? 'Description for administrative reference (not parsed).' : '')
-	  ->setWidth(4);
-
-	$group->add(new Form_Button(
-		"deleterow{$counter}",
-		'Delete',
-		null,
-		'fa-solid fa-trash-can'
-	))->addClass('btn-warning btn-sm');
-
-	$section->add($group);
-}
-
-$section->addInput(new Form_Button(
-	'addrow',
-	'Add Allowed IP',
+$group->add(new Form_Button(
+	'nextaddr',
+	'Suggest',
 	null,
-	'fa-solid fa-plus'
-))->addClass('btn-success btn-sm addbtn');
+	'fa-solid fa-wand-magic-sparkles'
+))->addClass('btn-primary btn-sm')
+  ->setHelp('Next free address on this tunnel');
+
+$section->add($group);
 
 $form->add($section);
 
-/*
- * Configuracion del cliente.
- *
- * Esta aca adentro y no en una pagina aparte porque la pagina de peer es de
- * este paquete: crear el peer y obtener el archivo del cliente son el mismo
- * acto, y separarlos obliga a repetir el tunel, la direccion y las claves.
- *
- * La clave privada del cliente queda guardada en config.xml, que es lo que
- * permite volver a bajar el archivo despues. Es una decision con costo: quien
- * pueda leer la configuracion del firewall puede suplantar al cliente. La
- * alternativa -- generarla y no guardarla -- da una sola oportunidad de
- * descargar y ninguna de rehacerlo.
- */
 $section = new Form_Section('Client Configuration');
 
-$section->addInput(new Form_Checkbox(
-	'client_enable',
-	'Generate',
-	gettext('Generate a client configuration for this peer'),
-	$pconfig['client_enable'] == 'yes'
-))->setHelp('Keeps the client side settings needed to hand this peer a ready to import file, ' .
-            'including the obfuscation parameters of its tunnel.<br />' .
-            '<span class="text-danger">Note: </span>this stores the client private key in the firewall configuration.');
+$section->addClass('clientonly');
 
-$section->addInput(new Form_Input(
-	'client_privatekey',
-	'Client Private Key',
-	awg_secret_input_type(),
-	$pconfig['client_privatekey'],
-	['autocomplete' => 'new-password']
-))->addClass('trim')
-  ->setHelp('Leave blank to generate one. The matching public key goes in the Public Key field above.');
-
-$section->addInput(new Form_Input(
-	'client_address',
-	'Client Address',
-	'text',
-	$pconfig['client_address'],
-	['placeholder' => '10.0.0.2/32']
-))->addClass('trim')
-  ->setHelp('Address the client assigns to its own interface. Leave blank for the next free one on the tunnel.');
+$section->addInput(new Form_Select(
+	'routing',
+	'Routing',
+	$pconfig['routing'],
+	array(
+		'full'		=> gettext('Full tunnel (send all traffic through the tunnel)'),
+		'split'		=> gettext('Split tunnel (only the tunnel networks)'),
+		'custom'	=> gettext('Custom'))
+))->setHelp('Preset for the networks below.');
 
 $section->addInput(new Form_Input(
 	'client_allowedips',
-	'Client Allowed IPs',
+	'*Tunneled Networks',
 	'text',
 	$pconfig['client_allowedips'],
-	['placeholder' => '0.0.0.0/0, ::/0']
+	['placeholder' => '0.0.0.0/0, ::/0', 'autocomplete' => 'off']
 ))->addClass('trim')
-  ->setHelp('What the client routes into the tunnel. Everything by default; narrow it for a split tunnel.');
+  ->setHelp('Networks the client routes into the tunnel. Written as <code>AllowedIPs</code> in the client file.');
 
 $section->addInput(new Form_Input(
-	'client_endpoint',
-	'Client Endpoint',
+	'dns',
+	'DNS Servers',
 	'text',
-	$pconfig['client_endpoint'],
-	['placeholder' => 'vpn.example.com:51820']
+	$pconfig['dns'],
+	['placeholder' => 'DNS Servers']
 ))->addClass('trim')
-  ->setHelp('Host and port the client uses to reach this firewall, as seen from the outside.');
+  ->setHelp('Optional. Separate multiple entries with commas.<br />
+	     Leave blank to keep the DNS servers already configured on the client.');
 
 $section->addInput(new Form_Input(
-	'client_dns',
-	'Client DNS',
+	'mtu',
+	'MTU',
 	'text',
-	$pconfig['client_dns'],
-	['placeholder' => 'DNS']
+	$pconfig['mtu'],
+	['placeholder' => 'MTU']
 ))->addClass('trim')
-  ->setHelp('Optional. Comma separated.');
+  ->setHelp('Optional. Filled in from the tunnel when it does not run on the default of ' .
+	    "{$awgg['default_mtu']}, which is what a client assumes on its own. Leave blank to let the client decide.");
 
-$section->addInput(new Form_Input(
-	'client_mtu',
-	'Client MTU',
-	'text',
-	$pconfig['client_mtu'],
-	['placeholder' => $awgg['default_mtu']]
-))->addClass('trim')
-  ->setHelp('Optional.');
-
-$section->addInput(new Form_Input(
-	'client_keepalive',
-	'Client Keep Alive',
-	'text',
-	$pconfig['client_keepalive'],
-	['placeholder' => '25']
-))->addClass('trim')
-  ->setHelp('Interval in seconds the client uses to hold a NAT mapping open. Blank or 0 disables it.');
+$section->addInput(new Form_Checkbox(
+	'applynow',
+	'Apply',
+	gettext('Apply the changes immediately'),
+	$pconfig['applynow'] == 'yes'
+))->setHelp('<span class="text-danger">Note: </span>This action may momentarily suspend active AmneziaWG peer connections on the changed tunnels.');
 
 if ($client_exportable) {
 	$section->addInput(new Form_StaticText(
@@ -502,66 +525,163 @@ print($form);
 	</button>
 </nav>
 
-<?php $genkeywarning = gettext("Overwrite pre-shared key? Click 'ok' to overwrite key."); ?>
+<?php
+$genkeywarning = gettext("Overwrite pre-shared key? Click 'ok' to overwrite key.");
+$genkeyswarning = gettext("Overwrite the client key pair? The client configuration already handed out would stop working. Click 'ok' to overwrite.");
+
+// Lo que cada tunel puede contestar por si mismo, para no volver al servidor
+// cada vez que se cambia la seleccion.
+$tunnel_hints = awg_client_tunnel_hints();
+?>
 
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
-	// Supress "Delete" button if there are fewer than two rows
-	checkLastRow();
+	var awgHints = <?=json_encode($tunnel_hints)?>;
 
 	awgRegTrimHandler();
 
-	$('#copypsk').click(function () {
-		var $this = $(this);
-		var originalText = $this.text();
+	function copyHandler(link, field) {
+		$(link).click(function () {
+			var $this = $(this);
+			var originalText = $this.text();
 
-		// The 'modern' way...
-		navigator.clipboard.writeText($('#presharedkey').val());
+			navigator.clipboard.writeText($(field).val());
 
-		$this.text($this.attr('data-success-text'));
+			$this.text($this.attr('data-success-text'));
 
-		setTimeout(function() {
-			$this.text(originalText);
-		}, $this.attr('data-timeout'));
+			setTimeout(function() {
+				$this.text(originalText);
+			}, $this.attr('data-timeout'));
 
-		// Prevents the browser from scrolling
-		return false;
-	});
+			// Prevents the browser from scrolling
+			return false;
+		});
+	}
+
+	copyHandler('#copypsk', '#presharedkey');
+	copyHandler('#copypriv', '#privatekey');
+	copyHandler('#copypub', '#publickey');
 
 	// These are action buttons, not submit buttons
-	$('#genpsk').prop('type','button');
+	$('#genpsk').prop('type', 'button');
+	$('#genkeys').prop('type', 'button');
+	$('#nextaddr').prop('type', 'button');
 
-	// Request a new pre-shared key
 	$('#genpsk').click(function(event) {
 		if ($('#presharedkey').val().length == 0 || confirm(<?=json_encode($genkeywarning)?>)) {
-			ajaxRequest = $.ajax({
+			$.ajax({
 				url: "/awg/vpn_awg_peers_edit.php",
 				type: "post",
-				data: {
-					act: "genpsk"
-				},
-				success: function(response, textStatus, jqXHR) {
+				data: { act: "genpsk" },
+				success: function(response) {
 					$('#presharedkey').val(response);
 				}
 			});
 		}
 	});
 
+	$('#genkeys').click(function(event) {
+		if ($('#privatekey').val().length == 0 || confirm(<?=json_encode($genkeyswarning)?>)) {
+			$.ajax({
+				url: "/awg/vpn_awg_peers_edit.php",
+				type: "post",
+				dataType: "json",
+				data: { act: "genkeys" },
+				success: function(response) {
+					$('#privatekey').val(response.privkey_clamped);
+					$('#publickey').val(response.pubkey);
+				}
+			});
+		}
+	});
+
+	$('#nextaddr').click(function(event) {
+		$.ajax({
+			url: "/awg/vpn_awg_peers_edit.php",
+			type: "post",
+			data: { act: "nextaddr", tun: $('#tun').val() },
+			success: function(response) {
+				if (response.length > 0) {
+					$('#address').val(response);
+				}
+			}
+		});
+	});
+
+	// El detectado solo se copia al endpoint; el servidor lo ignora
+	$('#endpoint_detected').change(function() {
+		if ($(this).val().length > 0) {
+			$('#endpoint').val($(this).val());
+		}
+	});
+
+	/*
+	 * Lo que cambia al elegir otro tunel. Solo se pisan los campos que salen
+	 * del tunel -- puerto, MTU, DNS, redes y la direccion sugerida -- y nunca
+	 * lo que el operador ya escribio a mano.
+	 */
+	function updateTunnelDefaults() {
+		var hint = awgHints[$('#tun').val()];
+
+		if (!hint) {
+			return;
+		}
+
+		$('#port').val(hint.port);
+		$('#address').val(hint.address);
+		$('#mtu').val(hint.defaults.mtu);
+		$('#routing').val(hint.defaults.routing);
+
+		applyRouting();
+
+		if (hint.defaults.dns !== null) {
+			$('#dns').val(hint.defaults.dns);
+		}
+	}
+
+	function applyRouting() {
+		var hint = awgHints[$('#tun').val()];
+
+		if (!hint) {
+			return;
+		}
+
+		switch ($('#routing').val()) {
+			case 'full':
+				$('#client_allowedips').val('<?=$awgg['default_allowedips']?>');
+				break;
+
+			case 'split':
+				$('#client_allowedips').val(hint.networks);
+				break;
+		}
+	}
+
+	$('#tun').change(updateTunnelDefaults);
+	$('#routing').change(applyRouting);
+
+	/*
+	 * Los dos modos de la pagina. Generando, la clave publica sale del par y no
+	 * se toca a mano; en modo manual es el unico dato del otro extremo y todo
+	 * lo que describe al cliente sobra.
+	 */
+	function updateClientMode() {
+		var generating = $('#client_enable').prop('checked');
+
+		hideClass('clientonly', !generating);
+
+		$('#publickey').prop('readonly', generating);
+	}
+
+	$('#client_enable').click(updateClientMode);
+
+	updateClientMode();
+
 	// Save the form
 	$('#saveform').click(function () {
 		$(form).submit();
 	});
-
-	$('#dynamic').click(function () {
-		updateDynamicSection(this.checked);
-	});
-
-	function updateDynamicSection(hide) {
-		hideClass('endpoint', hide);
-	}
-
-	updateDynamicSection($('#dynamic').prop('checked'));
 });
 //]]>
 </script>

@@ -110,23 +110,33 @@ página de peers que ya existe**, no en un módulo aparte: wgeasy tiene que
 atornillarse por afuera porque no puede tocar el paquete oficial de WireGuard,
 pero acá la página de peer es propia.
 
-Empezada, y ya se puede usar: la página de peers tiene una sección **Client
-Configuration** que guarda los datos del cliente sobre el peer, sortea el par de
-claves —la pública del peer se **deriva** de la privada del cliente, para que no
-puedan no corresponderse—, sugiere la próxima dirección libre del túnel y
-descarga el `.conf` armado en el momento.
+Empezada, y ya se puede usar. La página de peers quedó al nivel de la de wgeasy:
+mismos campos y mismas ayudas, el par de claves generado desde la página, la
+próxima dirección libre a un botón, y **todo lo que sale del túnel elegido
+—puerto, MTU, DNS, redes y los 16 parámetros de ofuscación— tomado del túnel**,
+no cargado a mano. Cambiar el túnel en el desplegable recalcula los valores sin
+volver al servidor.
+
+Tiene dos modos. Con *Generate a client configuration* tildado, el firewall arma
+el cliente entero y guarda su clave privada para poder volver a exportarlo; la
+clave pública del peer se **deriva** de la privada, porque cargarlas por
+separado y que no se correspondan da un cliente que no conecta y nada lo avisa.
+Destildado, es la página de peer de siempre: se pega una clave pública y no se
+guarda nada del otro lado, que es el caso site-to-site y el del cliente que
+genera sus propias claves —la práctica más segura—.
 
 La ofuscación del cliente sale de `awg_obfuscation_pairs()`, la misma función
 que escribe el `.conf` del servidor: los dos extremos tienen que ofuscar
 idéntico o no hay handshake, y dos copias del mismo bucle se desincronizan sin
 que falle nada hasta que un cliente no conecta.
 
-Verificado en los dos lados: 45 tests de lógica en `tools/test-client-conf.php`,
-y 8 contra el binario real en el firewall con `spike/verify-client-conf.php`,
-que comprueba que `awg(8)` parsee el archivo generado y —control negativo— que
-rechace uno con una clave inventada.
+Verificado en los dos lados: 61 tests de lógica en `tools/test-client-conf.php`,
+y 22 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
+`awg(8)` parsee el archivo generado —con control negativo— y que todo lo que se
+calcula del túnel aguante una instalación sin ningún túnel configurado.
 
-Falta el QR, el zip y el envío por mail.
+Falta la detección de endpoint por dyndns e interfaces, los presets de DNS y de
+alias, y después el QR, el zip y el envío por mail.
 
 ## Por dónde empezar
 

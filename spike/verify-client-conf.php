@@ -171,6 +171,64 @@ printf("  'telefono de prueba' -> %s\n", awg_client_conf_filename('telefono de p
 check('el nombre lo acepta un cliente de WireGuard',
 	preg_match('/^[a-zA-Z0-9_=+.-]{1,15}\.conf$/', awg_client_conf_filename('telefono de prueba')) === 1);
 
+/*
+ * Todo lo que la pagina de peers le pide al tunel elegido. Se corre contra la
+ * configuracion real, sin escribir nada, y con el caso que mas rompe: una
+ * instalacion sin ningun tunel, que es como esta un paquete recien instalado.
+ */
+printf("\n=== lo que sale del tunel ===\n\n");
+
+$tun_list = awg_get_tun_list();
+
+printf("  tuneles configurados: %d%s\n", count($tun_list),
+	count($tun_list) ? ' (' . implode(', ', array_keys($tun_list)) . ')' : '');
+
+$hints = awg_client_tunnel_hints();
+
+check('los hints se arman sin explotar', is_array($hints));
+check('y hay uno por tunel', count($hints) === count($tun_list));
+
+// El camino de la instalacion limpia: un tunel que no existe.
+$vacios = awg_client_tunnel_defaults('tun-que-no-existe');
+
+check('un tunel inexistente da defaults igual, sin fatal', is_array($vacios));
+check('con la ofuscacion vacia', $vacios['obfuscation'] === array());
+check('y el puerto por defecto del paquete', $vacios['port'] == $awgg['default_port'],
+	(string) $vacios['port']);
+check('sin direccion que sugerir', $vacios['address'] === null,
+	var_export($vacios['address'], true));
+check('las redes de un tunel inexistente son una lista vacia',
+	awg_client_tunnel_networks('tun-que-no-existe') === array());
+check('y su DNS es nulo', awg_client_tunnel_dns('tun-que-no-existe') === null);
+check('su clave publica tambien', awg_client_tunnel_publickey('tun-que-no-existe') === null);
+check('y su MTU', awg_client_tunnel_mtu('tun-que-no-existe') === null);
+check('y no tiene ultimo cliente', awg_client_last_peer_store('tun-que-no-existe') === array());
+
+// Las redes locales salen de las interfaces de verdad de este firewall.
+$locales = awg_client_local_networks();
+
+printf("  redes locales detectadas: %s\n",
+	empty($locales) ? '(ninguna)' : implode(', ', $locales));
+
+check('las redes locales son CIDR validos',
+	count(array_filter($locales, fn($n) => is_subnet($n))) === count($locales),
+	implode(', ', $locales));
+
+// 'unassigned' encabeza la lista pero no es un tunel, es la opcion de dejar el
+// peer suelto. Pedirle valores no tiene sentido.
+foreach (array_diff_key($tun_list, array('unassigned' => '')) as $tun_name => $tun_descr) {
+	$d = awg_client_tunnel_defaults($tun_name);
+
+	printf("  %s: puerto=%s dns=%s mtu=%s routing=%s ofuscacion=%d campos\n",
+		$tun_name, $d['port'], (string) $d['dns'], (string) $d['mtu'],
+		$d['routing'], count($d['obfuscation']));
+
+	check("{$tun_name}: el puerto es el del tunel",
+		$d['port'] == awg_client_tunnel_port($tun_name));
+	check("{$tun_name}: la ofuscacion sale del tunel y no esta vacia",
+		count($d['obfuscation']) > 0, 'el tunel no tiene ningun campo cargado');
+}
+
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 
 exit($fail > 0 ? 1 : 0);
