@@ -527,6 +527,15 @@ function awg_do_tunnel_post($post) {
 		$pconfig[$field]	= isset($post[$field]) ? trim($post[$field]) : '';
 	}
 
+	/*
+	 * El nivel de AmneziaWG del tunel. Sin campo en el POST --una pagina vieja
+	 * en el navegador, o un tunel que viene de antes del selector-- se guarda el
+	 * techo del firewall, que es lo que este tunel venia haciendo de hecho.
+	 */
+	$pconfig['awgversion']		= isset($post['awgversion'])
+					    ? trim($post['awgversion'])
+					    : (string) awg_version_ceiling();
+
 	$input_errors			= awg_validate_tunnel_post($pconfig, $tun_idx);
 
 	if (empty($input_errors)) {

@@ -213,26 +213,67 @@ $awgg = array(
 	 * rango con guion (787134324-1593815189). Modelarlos como campo numerico
 	 * los rompe en silencio contra configuraciones reales.
 	 *
-	 * 'awg2' marca los que solo entiende un backend AmneziaWG 2.0. Contra un
-	 * backend 1.x no deben escribirse en el .conf.
+	 * 'version' es el nivel de AmneziaWG que hace falta para entender el campo.
+	 * Contra un backend --o un cliente-- de un nivel menor no deben escribirse
+	 * en el .conf: awg(8) aborta el archivo entero ante una clave que no conoce.
 	 */
 	'obfuscation_fields'	=> array(
-		'jc'   => array('type' => 'int',  'min' => 1, 'max' => 128,  'awg2' => false),
-		'jmin' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'awg2' => false),
-		'jmax' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'awg2' => false),
-		's1'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'awg2' => false),
-		's2'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'awg2' => false),
-		's3'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'awg2' => true),
-		's4'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'awg2' => true),
-		'h1'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'awg2' => false),
-		'h2'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'awg2' => false),
-		'h3'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'awg2' => false),
-		'h4'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'awg2' => false),
-		'i1'   => array('type' => 'text', 'awg2' => true),
-		'i2'   => array('type' => 'text', 'awg2' => true),
-		'i3'   => array('type' => 'text', 'awg2' => true),
-		'i4'   => array('type' => 'text', 'awg2' => true),
-		'i5'   => array('type' => 'text', 'awg2' => true)),
+		'jc'   => array('type' => 'int',  'min' => 1, 'max' => 128,  'version' => 1),
+		'jmin' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1),
+		'jmax' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1),
+		's1'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1),
+		's2'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1),
+		's3'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2),
+		's4'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2),
+		'h1'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
+		'h2'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
+		'h3'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
+		'h4'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
+		'i1'   => array('type' => 'text', 'version' => 2),
+		'i2'   => array('type' => 'text', 'version' => 2),
+		'i3'   => array('type' => 'text', 'version' => 2),
+		'i4'   => array('type' => 'text', 'version' => 2),
+		'i5'   => array('type' => 'text', 'version' => 2)),
+
+	/*
+	 * Los niveles de AmneziaWG, que es lo que elige el selector del tunel.
+	 *
+	 * La pregunta que hace el selector NO es "que version tengo" sino "que
+	 * entiende el extremo mas debil de este tunel". El backend se detecta solo
+	 * --awg_backend_version()-- y pone el techo; abajo de ese techo la eleccion
+	 * es del usuario, porque el otro extremo puede ser mas viejo: la app de
+	 * Android estable es 2.0.x y todo lo 3.x esta publicado como prerelease.
+	 *
+	 * 3.0 (amneziawg-tools v3.0.20260730 en adelante) agrega en [Interface]
+	 * ContentPaddingAddition (rango u16), HeaderProtectionKey (una clave) y los
+	 * timings RekeyAfterTime, RekeyTimeout, RejectAfterTime, KeepaliveTimeout y
+	 * MaxHandshakeAttempts; 3.1 suma RandomTrailers y DisableCookies, los dos
+	 * booleanos. Estan leidos del config.c de las tools, no de la doc.
+	 */
+	'awg_versions'	=> array(
+		1 => array(
+			'label' => 'AmneziaWG 1.x',
+			'descr' => 'Jc, Jmin, Jmax, S1, S2 y H1-H4. Lo entiende cualquier cliente de AmneziaWG.'),
+		2 => array(
+			'label' => 'AmneziaWG 2.0',
+			'descr' => 'Agrega S3, S4 e I1-I5. Es lo que entiende la app estable de Android (2.0.x).'),
+		3 => array(
+			'label' => 'AmneziaWG 3.0',
+			'descr' => 'Agrega relleno de contenido, proteccion de headers y los timings.')),
+
+	/*
+	 * Hasta que nivel sabe escribir ESTE paquete, que es una cosa distinta de
+	 * hasta donde llega el backend. Hoy son 2 por dos razones independientes: el
+	 * awg que va adentro del .pkg no conoce ninguna clave de 3.0, y los campos
+	 * de 3.0 no estan implementados aca. Ofrecer un nivel que no se puede probar
+	 * seria publicar soporte que nadie verifico.
+	 *
+	 * Subirlo a 3 es: agregar esos campos a obfuscation_fields con
+	 * 'version' => 3, dibujarlos en la pagina del tunel, y cambiar este 2 por un
+	 * 3. Todo lo demas --deteccion, filtrado al escribir, validacion, el
+	 * selector-- ya cuenta hasta 3.
+	 */
+	'awg_version_implemented'	=> 2,
 
 	// Un valor suelto, o un rango 'desde-hasta'.
 	'header_mask'		=> '/^\d{1,10}(-\d{1,10})?$/',
@@ -265,12 +306,18 @@ $awgg['xml_paths_to_clean']	= [$awgg['xml_path'], 'amneziawg'];
 $awgg['depends_names']		= array($awgg['pkg_name']);
 
 /*
- * Version del protocolo que soporta el backend instalado (1 o 2). No se puede
+ * Nivel de AmneziaWG que soporta el backend instalado (1, 2 o 3). No se puede
  * deducir de 'awg --version': ese numero no tiene relacion con la version del
- * paquete. Se detecta probando un setconf con S3/S4 y viendo si lo acepta, una
- * vez al instalar, y se cachea aca. Ver docs/arquitectura.md, seccion 11.
+ * paquete --lo escribe el port de FreeBSD con un parche a version.h--. Se
+ * detecta probando un setconf con las claves de cada nivel y viendo cual acepta,
+ * y se cachea aca. Ver docs/arquitectura.md, seccion 11.
+ *
+ * Archivo nuevo a proposito: el anterior guardaba 0/1 para "soporta 2.0", y un
+ * '1' viejo significa lo contrario que un '1' de ahora. Compartir el nombre
+ * habria hecho que una actualizacion del paquete leyera 1.x donde hay 2.0, sin
+ * ningun sintoma hasta que un tunel dejara de escribir S3.
  */
-$awgg['awg2_cache']		= "{$awgg['run_path']}/backend_version";
+$awgg['awg_version_cache']	= "{$awgg['run_path']}/backend_awg_version";
 
 $awgg['pid_path']		= "{$g['varrun_path']}/{$awgg['service_name']}.pid";
 $awgg['subsystems']		= array(

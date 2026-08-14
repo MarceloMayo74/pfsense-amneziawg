@@ -51,8 +51,16 @@ for f in $(find "$SRC" \( -name '*.inc' -o -name '*.php' \) | sort); do
 			next
 		}
 		infn {
-			if ($0 ~ /global[^;]*\$awgg/) { hasglobal = 1 }
-			if ($0 ~ /\$awgg/) { uses = 1 }
+			# Un $awgg nombrado en un comentario no lo lee nadie. Sin esto,
+			# explicar en un comentario por que una funcion NO mira el globals
+			# la hace aparecer como si lo usara mal.
+			line = $0
+			sub(/\/\/.*/, "", line)
+			sub(/^[ \t]*\*.*/, "", line)
+			sub(/\/\*.*\*\//, "", line)
+
+			if (line ~ /global[^;]*\$awgg/) { hasglobal = 1 }
+			if (line ~ /\$awgg/) { uses = 1 }
 		}
 	' "$f")
 

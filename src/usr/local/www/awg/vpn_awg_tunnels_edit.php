@@ -392,14 +392,60 @@ $form->add($section);
  */
 $section = new Form_Section('Obfuscation');
 
-$awg2 = awg_backend_supports_awg2();
+/*
+ * El selector de version.
+ *
+ * La pregunta no es "que version tengo" sino QUE ENTIENDE EL EXTREMO MAS DEBIL
+ * del tunel, y por eso se puede elegir menos de lo que soporta el backend: la
+ * app estable de Android es 2.0.x, y una configuracion con una clave que el
+ * cliente no conoce no se degrada, se rechaza entera.
+ *
+ * Arriba del techo no se ofrece nada, y se dice por que. Las dos razones son
+ * independientes -- el backend instalado y lo que este paquete sabe escribir --
+ * asi que se informan por separado.
+ */
+$backend_version = awg_backend_version();
+$ceiling         = awg_version_ceiling();
+$awg_version     = awg_tunnel_version($pconfig, $ceiling);
+
+// Los campos que existen en la pagina, que es cosa del techo y no de lo elegido.
+$awg2 = ($ceiling >= 2);
+
+$version_options = array();
+
+foreach ($awgg['awg_versions'] as $level => $meta) {
+	if ($level <= $ceiling) {
+		$version_options[$level] = $meta['label'];
+	}
+}
+
+$version_help = gettext('What the <b>weakest end</b> of this tunnel understands — not what this firewall supports. Anything above the level you pick is left out of both configuration files, even if it has a value stored.');
+
+foreach ($awgg['awg_versions'] as $level => $meta) {
+	if ($level <= $ceiling) {
+		continue;
+	}
+
+	$why = ($level > $backend_version)
+	    ? sprintf(gettext('the %s bundled with this package does not understand it'), 'awg(8)')
+	    : gettext('this package does not write those parameters yet');
+
+	$version_help .= '<br />' . sprintf(
+		gettext('<b>%1$s</b> is not offered: %2$s.'),
+		$meta['label'], $why);
+}
+
+$section->addInput(new Form_Select(
+	'awgversion',
+	'Compatibility',
+	$awg_version,
+	$version_options
+))->setHelp($version_help);
 
 $section->addInput(new Form_StaticText(
-	'Backend',
-	$awg2
-	    ? "<i class='fa-solid fa-circle-check' style='vertical-align: middle;'></i><span style='padding-left: 3px'>{$s(gettext('AmneziaWG 2.0. Every parameter below is supported.'))}</span>"
-	    : "<i class='fa-solid fa-triangle-exclamation' style='vertical-align: middle;'></i><span style='padding-left: 3px'>{$s(gettext('AmneziaWG 1.x. S3, S4 and I1-I5 are not supported and are left out of the tunnel configuration, but any value already stored is kept.'))}</span>"
-))->setHelp('Both ends of a tunnel must use the <b>same</b> obfuscation parameters. If they differ, the handshake never completes.');
+	'',
+	"<span class='text-muted'>{$s(gettext('Both ends of a tunnel must obfuscate identically. If a parameter differs, the handshake simply never completes and nothing logs an error.'))}</span>"
+));
 
 // Paquetes basura antes del handshake
 $group = new Form_Group('Junk Packets');
@@ -522,6 +568,11 @@ $section->addInput(new Form_StaticText(
 /*
  * I1-I5 son paquetes basura con contenido elegido, no relleno aleatorio, y
  * solo los entiende un backend 2.0.
+ *
+ * Se dibujan si el FIREWALL llega a 2.0, no si el tunel esta en 2.0: el
+ * selector los muestra y los esconde sin volver al servidor, y lo que decide si
+ * se escriben es awg_obfuscation_pairs(). La clase es de donde los agarra ese
+ * javascript.
  */
 if ($awg2) {
 	$group = new Form_Group('Junk Payloads');
@@ -537,25 +588,27 @@ if ($awg2) {
 		  ->setWidth(2);
 	}
 
-	$section->add($group);
+	$group->addClass('awg-v2-only')
+	      ->setHelp(gettext('Optional junk packets with content you choose, sent before the handshake. Leave empty unless you are matching a configuration that already uses them.'));
 
-	$section->addInput(new Form_StaticText(
-		'',
-		"<span class='text-muted'>{$s(gettext('Optional junk packets with content you choose, sent before the handshake. Leave empty unless you are matching a configuration that already uses them.'))}</span>"
-	));
+	$section->add($group);
 }
 
 $form->add($section);
 
 /*
- * Los campos de AWG 2.0 no se dibujan contra un backend 1.x, pero lo que ya
- * este guardado viaja igual en el POST: si no, editar cualquier otra cosa del
- * tunel borraria valores que el usuario nunca vio, y que vuelven a servir en
- * cuanto el backend se actualice.
+ * Los campos que el firewall no alcanza no se dibujan, pero lo que ya este
+ * guardado viaja igual en el POST: si no, editar cualquier otra cosa del tunel
+ * borraria valores que el usuario nunca vio, y que vuelven a servir en cuanto
+ * el backend se actualice.
+ *
+ * Bajar el selector NO borra nada, por la misma razon: los campos se esconden y
+ * dejan de escribirse, pero siguen ahi si mañana se vuelve a subir. Lo que
+ * garantiza que no se escriban es awg_obfuscation_pairs(), no esta pantalla.
  */
 if (!$awg2) {
 	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
-		if ($spec['awg2']) {
+		if ($spec['version'] > $ceiling) {
 			$form->addGlobal(new Form_Input(
 				$field,
 				'',
@@ -695,6 +748,26 @@ events.push(function() {
 	checkLastRow();
 
 	awgRegTrimHandler();
+
+	/*
+	 * El selector de version manda sobre que campos se ven. Solo esconde: lo
+	 * que decide que se escribe en los .conf es awg_obfuscation_pairs(), del
+	 * lado del servidor, para que bajar de nivel no deje un S3 viejo colandose
+	 * en el archivo.
+	 *
+	 * Los campos de 2.0 pueden no existir en la pagina --contra un backend
+	 * 1.x-- y entonces esto no hace nada, que es lo correcto.
+	 */
+	function awgApplyVersion() {
+		var below2 = (parseInt($('#awgversion').val(), 10) < 2);
+
+		hideGroupInput('s3', below2);
+		hideGroupInput('s4', below2);
+		hideClass('awg-v2-only', below2);
+	}
+
+	$('#awgversion').change(awgApplyVersion);
+	awgApplyVersion();
 
 	$('#copypubkey').click(function () {
 		var $this = $(this);

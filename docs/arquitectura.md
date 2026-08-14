@@ -582,14 +582,26 @@ el ping— pero ningún harness futuro debería volver a apoyarse en ese camino.
   El método confiable es la **sonda empírica**: intentar un `setconf` con
   `S3`/`S4` y ver si lo acepta.
 
-  **Implementado en la fase 3** como `awg_backend_supports_awg2()`, y sale más
-  barata de lo previsto: no hace falta ni interfaz ni proceso. `awg(8)` parsea
-  el archivo entero *antes* de tocar la interfaz, así que un `setconf` contra
-  una interfaz inexistente falla siempre pero falla distinto —
-  `Configuration parsing error` si no conoce la clave, `Device not configured`
-  si sí—. Y es justo la pregunta que importa: lo que hay que saber es si es
-  seguro escribir `S3`/`S4` en el `.conf`. El resultado se cachea en
-  `run_path`, que es tmpfs, así que se revalida solo en cada boot.
+  **Implementado en la fase 3**, y sale más barata de lo previsto: no hace falta
+  ni interfaz ni proceso. `awg(8)` parsea el archivo entero *antes* de tocar la
+  interfaz, así que un `setconf` contra una interfaz inexistente falla siempre
+  pero falla distinto — `Configuration parsing error` si no conoce la clave,
+  `Device not configured` si sí—. Y es justo la pregunta que importa: lo que hay
+  que saber es si es seguro escribir `S3`/`S4` en el `.conf`. El resultado se
+  cachea en `run_path`, que es tmpfs, así que se revalida solo en cada boot.
+
+  Hoy es `awg_backend_version()`, que devuelve **1, 2 o 3** probando de arriba
+  hacia abajo con la clave que estrena cada nivel: `ContentPaddingAddition` para
+  3.0, `S3`/`S4` para 2.0. `awg_backend_supports_awg2()` quedó como envoltorio.
+  El control negativo de `spike/verify-version.php` —una clave inventada tiene
+  que ser rechazada— es lo que distingue una sonda que anda de una que dice
+  siempre lo mismo por estar mal escrita.
+
+  El cache cambió de archivo a propósito: el viejo guardaba `0`/`1` para
+  "soporta 2.0", donde un `1` significa lo contrario que un `1` de ahora.
+  Compartir el nombre habría hecho que una actualización del paquete leyera
+  1.x donde hay 2.0, sin ningún síntoma hasta que un túnel dejara de escribir
+  `S3`.
 
 - **Lectura del estado.** `awg show <if>` devuelve los parámetros de ofuscación
   ya aplicados (`jc`, `jmin`, `jmax`, `s1`, `s2`, `h1`–`h4`), no solo el

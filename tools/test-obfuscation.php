@@ -53,7 +53,28 @@ if (empty($fields) || empty($mask)) {
 	exit(2);
 }
 
-eval('$awgg = array(' . rtrim($fields[0], ',') . ", 'header_mask' => '{$mask[1]}');");
+preg_match("/'awg_versions'.*?'label' => 'AmneziaWG 3\.0'.*?\)\),/s", $globals, $versions);
+
+if (empty($versions)) {
+	fwrite(STDERR, "No se pudieron leer awg_versions de awg_globals.inc
+");
+	exit(2);
+}
+
+eval('$awgg = array(' . rtrim($fields[0], ',') . ', ' . rtrim($versions[0], ',') .
+     ", 'header_mask' => '{$mask[1]}');");
+
+/*
+ * El techo depende de una sonda al backend, que fuera del firewall no existe.
+ * Se fija a mano para poder probar las dos orillas de la validacion.
+ */
+$test_ceiling = 2;
+
+function awg_version_ceiling($use_cache = true) {
+	global $test_ceiling;
+
+	return $test_ceiling;
+}
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_headers'));
@@ -166,6 +187,39 @@ $h = awg_gen_headers();
 check('lo que sortea pasa su propia validacion',
       count(awg_validate_obfuscation(pc($h))) === 0,
       json_encode(awg_validate_obfuscation(pc($h))));
+
+printf("\n=== el nivel de AmneziaWG del tunel ===\n\n");
+
+$test_ceiling = 2;
+
+check('sin campo no se valida nada: es un tunel de antes del selector',
+	count(awg_validate_obfuscation(pc())) === 0);
+
+foreach (array('1', '2') as $ok) {
+	check("acepta el nivel {$ok}, que esta bajo el techo",
+		count(awg_validate_obfuscation(pc(array('awgversion' => $ok)))) === 0,
+		json_encode(awg_validate_obfuscation(pc(array('awgversion' => $ok)))));
+}
+
+check('rechaza un nivel por encima del techo del firewall',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '3')))) === 1,
+	json_encode(awg_validate_obfuscation(pc(array('awgversion' => '3')))));
+
+check('rechaza un nivel que no existe',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '7')))) === 1);
+
+check('rechaza cualquier cosa que no sea un nivel',
+	count(awg_validate_obfuscation(pc(array('awgversion' => 'dos')))) === 1);
+
+$test_ceiling = 1;
+
+check('con un backend 1.x rechaza el 2.0 que antes aceptaba',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '2')))) === 1);
+
+check('con un backend 1.x el 1.x sigue estando bien',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '1')))) === 0);
+
+$test_ceiling = 2;
 
 printf("\n%d pasaron, %d fallaron\n", $pass, $fail);
 

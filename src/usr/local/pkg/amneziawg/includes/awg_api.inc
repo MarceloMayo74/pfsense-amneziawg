@@ -623,11 +623,11 @@ function awg_if_create($if_name, &$cmds = null) {
 }
 
 /*
- * Indica si el backend instalado entiende los campos de AmneziaWG 2.0
- * (S3, S4, I1-I5).
+ * Le pregunta al backend si entiende ciertas claves de [Interface].
  *
- * No se puede preguntar: 'awg --version' devuelve un numero sin relacion con
- * la version del paquete (docs/arquitectura.md, seccion 11). La sonda es
+ * No se le puede preguntar de frente: 'awg --version' devuelve un numero sin
+ * relacion con la version del paquete --lo escribe el port de FreeBSD con un
+ * parche a version.h-- (docs/arquitectura.md, seccion 11). La sonda es
  * empirica, y aprovecha que awg(8) parsea el archivo ENTERO antes de tocar la
  * interfaz. Un setconf contra una interfaz que no existe falla siempre, pero
  * falla distinto segun entienda o no las claves:
@@ -635,69 +635,139 @@ function awg_if_create($if_name, &$cmds = null) {
  *   clave desconocida  ->  "Line unrecognized: `X=1'" + "Configuration parsing error"
  *   clave conocida     ->  "Unable to modify interface: Device not configured"
  *
- * Asi que no hace falta levantar un proceso ni crear una interfaz. Y es
- * justo la pregunta que importa: lo que hay que saber es si es seguro escribir
- * S3/S4 en el .conf. Si awg no los conoce aborta el parseo del archivo entero,
- * de modo que un campo de mas no degrada la ofuscacion: impide que el tunel
- * levante.
+ * Asi que no hace falta levantar un proceso ni crear una interfaz.
+ */
+function awg_backend_knows_keys($lines) {
+	global $awgg;
+
+	if (!file_exists($awgg['awg'])) {
+		return false;
+	}
+
+	$probe_conf = tempnam('/tmp', 'awgprobe');
+
+	if ($probe_conf === false) {
+		return false;
+	}
+
+	/*
+	 * La clave privada nunca se aplica: el parseo es lo unico que llega a
+	 * correr. Pero tiene que ser sintacticamente valida, o el archivo se
+	 * rechazaria por el motivo equivocado.
+	 */
+	file_put_contents($probe_conf, implode("\n", array_merge(
+		array('[Interface]', 'PrivateKey = ' . base64_encode(random_bytes(32))),
+		$lines,
+		array(''))));
+
+	// Una interfaz que no existe: el setconf no puede llegar a aplicarse.
+	$probe_if = 'awgprobe' . getmypid();
+
+	$res = awg_exec("{$awgg['awg']} setconf " .
+			escapeshellarg($probe_if) . ' ' .
+			escapeshellarg($probe_conf) . ' 2>&1');
+
+	$output = implode("\n", (array) $res['output']);
+
+	unlink($probe_conf);
+
+	// Solo un rechazo de parseo dice que el backend no las entiende.
+	return (stripos($output, 'unrecognized') === false) &&
+	       (stripos($output, 'parsing error') === false);
+}
+
+/*
+ * Que nivel de AmneziaWG entiende el backend instalado: 1, 2 o 3.
+ *
+ * Es la pregunta que importa antes de escribir un .conf. Si awg no conoce una
+ * clave aborta el parseo del archivo entero, de modo que un campo de mas no
+ * degrada la ofuscacion: impide que el tunel levante.
+ *
+ * Se prueba de arriba hacia abajo y se corta en el primero que pasa, porque los
+ * niveles son acumulativos: un backend que entiende 3.0 entiende 2.0. Las
+ * claves elegidas para preguntar son las que estrenan cada nivel --S3/S4 en
+ * 2.0, ContentPaddingAddition en 3.0-- leidas del config.c de amneziawg-tools.
  *
  * El cache vive en run_path, que es tmpfs, asi que se revalida solo en cada
  * boot. Es lo que se quiere: sobrevive a la sesion, no a una actualizacion del
  * paquete.
  */
-function awg_backend_supports_awg2($use_cache = true) {
+function awg_backend_version($use_cache = true) {
 	global $awgg;
 
-	if ($use_cache && file_exists($awgg['awg2_cache'])) {
-		$cached = trim(file_get_contents($awgg['awg2_cache']));
+	if ($use_cache && file_exists($awgg['awg_version_cache'])) {
+		$cached = trim(file_get_contents($awgg['awg_version_cache']));
 
-		if (($cached === '0') || ($cached === '1')) {
-			return ($cached === '1');
+		if (isset($awgg['awg_versions'][$cached])) {
+			return (int) $cached;
 		}
 	}
 
-	$supported = false;
+	$version = 1;
 
-	if (file_exists($awgg['awg'])) {
-		$probe_conf = tempnam('/tmp', 'awgprobe');
-
-		if ($probe_conf !== false) {
-			/*
-			 * La clave privada nunca se aplica: el parseo es lo unico que
-			 * llega a correr. Pero tiene que ser sintacticamente valida, o el
-			 * archivo se rechazaria por el motivo equivocado.
-			 */
-			file_put_contents($probe_conf, implode("\n", array(
-				'[Interface]',
-				'PrivateKey = ' . base64_encode(random_bytes(32)),
-				'S3 = 20',
-				'S4 = 25',
-				'')));
-
-			// Una interfaz que no existe: el setconf no puede llegar a aplicarse.
-			$probe_if = 'awgprobe' . getmypid();
-
-			$res = awg_exec("{$awgg['awg']} setconf " .
-					escapeshellarg($probe_if) . ' ' .
-					escapeshellarg($probe_conf) . ' 2>&1');
-
-			$output = implode("\n", (array) $res['output']);
-
-			// Solo un rechazo de parseo dice que el backend no los entiende.
-			$supported = (stripos($output, 'unrecognized') === false) &&
-				     (stripos($output, 'parsing error') === false);
-
-			unlink($probe_conf);
-		}
+	if (awg_backend_knows_keys(array('ContentPaddingAddition = 5'))) {
+		$version = 3;
+	} else if (awg_backend_knows_keys(array('S3 = 20', 'S4 = 25'))) {
+		$version = 2;
 	}
 
 	if (!file_exists($awgg['run_path'])) {
 		mkdir($awgg['run_path'], 0700, true);
 	}
 
-	file_put_contents($awgg['awg2_cache'], $supported ? '1' : '0');
+	file_put_contents($awgg['awg_version_cache'], (string) $version);
 
-	return $supported;
+	return $version;
+}
+
+/*
+ * Hasta que nivel se puede llegar en este firewall: lo que entiende el backend,
+ * topeado por lo que este paquete sabe escribir. Es el techo del selector.
+ */
+function awg_version_ceiling($use_cache = true) {
+	global $awgg;
+
+	return min(awg_backend_version($use_cache), $awgg['awg_version_implemented']);
+}
+
+/*
+ * El nivel efectivo de un tunel: lo que eligio el usuario, topeado por el techo.
+ *
+ * El tope no es paranoia. El campo se guarda en config.xml, que sobrevive a un
+ * downgrade del paquete y viaja en un restore a otro firewall: un tunel marcado
+ * 2.0 puede terminar corriendo contra un backend 1.x, y ahi lo que hay que
+ * hacer es escribir menos, no romper el tunel.
+ */
+function awg_tunnel_version($tunnel, $ceiling = null) {
+	if ($ceiling === null) {
+		$ceiling = awg_version_ceiling();
+	}
+
+	$stored = trim((string) ($tunnel['awgversion'] ?? ''));
+
+	/*
+	 * Sin campo guardado --un tunel de antes del selector-- vale lo que se venia
+	 * haciendo: escribir todo lo que el backend acepte. Un valor que no sea un
+	 * numero es lo mismo que no tener campo.
+	 *
+	 * A proposito NO se mira $awgg['awg_versions'] para decidir si el valor
+	 * sirve. Un test lo agarro haciendo exactamente eso: cualquier problema para
+	 * reconocer el nivel guardado terminaba escribiendo de mas --el tunel decia
+	 * 1.x y el .conf salia con S3-- que es el lado caro de equivocarse. Asi el
+	 * unico camino a un nivel alto es que el numero lo pida.
+	 */
+	if (($stored === '') || !ctype_digit($stored)) {
+		return $ceiling;
+	}
+
+	return max(1, min((int) $stored, $ceiling));
+}
+
+/*
+ * Compatibilidad: quedaba escrito en varios lados y dice menos que la version.
+ */
+function awg_backend_supports_awg2($use_cache = true) {
+	return (awg_backend_version($use_cache) >= 2);
 }
 
 /*
@@ -710,31 +780,36 @@ function awg_backend_supports_awg2($use_cache = true) {
  * exactamente la clase de duplicacion que se desincroniza sin que nada falle
  * hasta que un cliente no conecta.
  *
- * Los de AWG 2.0 se omiten contra un backend 1.x, y esto es lo unico que de
- * verdad tiene que respetar la version: awg(8) aborta el parseo del archivo
- * entero al encontrar una clave que no conoce, asi que un S3 de mas no degrada
- * la ofuscacion sino que deja el tunel sin levantar.
+ * Los campos por encima del nivel del tunel se omiten, y **esta funcion es el
+ * unico lugar donde esa decision es autoritativa**. Que la pagina los esconda no
+ * alcanza: lo escondido se sigue guardando --a proposito, para no borrarle al
+ * usuario valores que no vio-- asi que si el filtro viviera en la GUI, bajar un
+ * tunel de 2.0 a 1.x seguiria escribiendo su S3 en los dos .conf y el tunel
+ * dejaria de levantar mientras la pantalla dice 1.x.
+ *
+ * Y no levantar es literal: awg(8) aborta el parseo del archivo entero al
+ * encontrar una clave que no conoce, asi que un S3 de mas no degrada la
+ * ofuscacion, la impide. Lo mismo del otro lado -- la app de Android rechaza el
+ * archivo completo con UNKNOWN_ATTRIBUTE.
  *
  * El nombre de la clave es el del campo capitalizado -- jc/jmin/s1/h1/i1 dan
  * Jc/Jmin/S1/H1/I1 -- que es exactamente como los nombra el parser de
  * amneziawg-tools.
  *
- * $awg2 se puede forzar para no pagar la sonda al backend cuando ya se conoce
- * la respuesta, y para poder testear las dos ramas sin un firewall al lado.
+ * $ceiling se puede forzar para no pagar la sonda al backend cuando ya se conoce
+ * la respuesta, y para poder testear los tres niveles sin un firewall al lado.
  */
-function awg_obfuscation_pairs($tunnel, $awg2 = null) {
+function awg_obfuscation_pairs($tunnel, $ceiling = null) {
 	global $awgg;
 
-	if ($awg2 === null) {
-		$awg2 = awg_backend_supports_awg2();
-	}
+	$version = awg_tunnel_version($tunnel, $ceiling);
 
 	$pairs = array();
 
 	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
 		$value = trim((string) ($tunnel[$field] ?? ''));
 
-		if (($value === '') || ($spec['awg2'] && !$awg2)) {
+		if (($value === '') || ($spec['version'] > $version)) {
 			continue;
 		}
 

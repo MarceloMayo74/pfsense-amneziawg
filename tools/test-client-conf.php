@@ -124,6 +124,7 @@ if (!function_exists('is_ipaddrv4')) {
 	function ip_less_than($a, $b) { return (ip2long($a) < ip2long($b)); }
 }
 
+eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_obfuscation_pairs'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_build_conf'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_conf_filename'));
@@ -177,8 +178,9 @@ $tunnel = array(
 
 printf("\n-- awg_obfuscation_pairs() --\n\n");
 
-$pairs_1x = awg_obfuscation_pairs($tunnel, false);
-$pairs_2x = awg_obfuscation_pairs($tunnel, true);
+// El segundo argumento es el techo del firewall: 1 = backend 1.x, 2 = 2.0.
+$pairs_1x = awg_obfuscation_pairs($tunnel, 1);
+$pairs_2x = awg_obfuscation_pairs($tunnel, 2);
 
 check('capitaliza los nombres como los espera el parser',
 	isset($pairs_1x['Jc'], $pairs_1x['Jmin'], $pairs_1x['Jmax'], $pairs_1x['S1'], $pairs_1x['H1']),
@@ -205,7 +207,40 @@ check('el header sobrevive como rango, no como entero',
 	$pairs_1x['H1'] ?? '(ausente)');
 
 check('un tunel sin ofuscacion da un array vacio',
-	awg_obfuscation_pairs(array('name' => 'tun9001'), true) === array());
+	awg_obfuscation_pairs(array('name' => 'tun9001'), 2) === array());
+
+/*
+ * El selector del tunel, que es lo que hace que bajar de nivel no deje un S3
+ * viejo colandose en los .conf mientras la pantalla dice 1.x.
+ */
+$tunnel_1x = array_merge($tunnel, array('awgversion' => '1'));
+$tunnel_2x = array_merge($tunnel, array('awgversion' => '2'));
+
+check('un tunel marcado 1.x no escribe S3/S4/I1 aunque el firewall llegue a 2.0',
+	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['S3']) &&
+	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['S4']) &&
+	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['I1']),
+	implode(',', array_keys(awg_obfuscation_pairs($tunnel_1x, 2))));
+
+check('un tunel marcado 1.x sigue escribiendo lo suyo',
+	isset(awg_obfuscation_pairs($tunnel_1x, 2)['Jc'], awg_obfuscation_pairs($tunnel_1x, 2)['S1']));
+
+check('un tunel marcado 2.0 escribe todo si el firewall llega',
+	isset(awg_obfuscation_pairs($tunnel_2x, 2)['S3'], awg_obfuscation_pairs($tunnel_2x, 2)['I1']));
+
+check('un tunel marcado 2.0 contra un backend 1.x no escribe los de 2.0',
+	!isset(awg_obfuscation_pairs($tunnel_2x, 1)['S3']),
+	implode(',', array_keys(awg_obfuscation_pairs($tunnel_2x, 1))));
+
+check('un tunel sin el campo se comporta como antes del selector: escribe hasta el techo',
+	isset(awg_obfuscation_pairs($tunnel, 2)['S3']) &&
+	!isset(awg_obfuscation_pairs($tunnel, 1)['S3']));
+
+check('un nivel guardado por encima del techo se baja al techo, no rompe',
+	awg_tunnel_version(array('awgversion' => '3'), 2) === 2);
+
+check('un nivel guardado que no existe cae al techo',
+	awg_tunnel_version(array('awgversion' => 'pepe'), 2) === 2);
 
 printf("\n-- awg_client_build_conf() --\n\n");
 

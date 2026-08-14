@@ -93,8 +93,8 @@ está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
 ### Herramientas de verificación
 
 ```sh
-.tools\php\php.exe tools\test-obfuscation.php   # 38 tests de validación
-.tools\php\php.exe tools\test-client-conf.php   # 75 tests del .conf del cliente
+.tools\php\php.exe tools\test-obfuscation.php   # 46 tests de validación
+.tools\php\php.exe tools\test-client-conf.php   # 89 tests del .conf del cliente
 .tools\php\php.exe tools\test-mail.php          # 61 tests del envío por mail
 sh tools/check-calls.sh                         # llamadas a funciones awg_* que no existen
 sh tools/check-collisions.sh                    # símbolos globales vs WireGuard
@@ -105,14 +105,15 @@ Los dos últimos existen por bugs que llegaron a un firewall de verdad: uno borr
 un cron del sistema (fase 5 en `docs/arquitectura.md`) y el otro tiró un fatal
 al guardar un peer. `php -l` no ve ninguno de los dos.
 
-Y hay tres sondas que corren **sobre el firewall**, contra el paquete instalado,
-porque hay cosas que solo se ven ahí:
+Y hay cuatro sondas que corren **sobre el firewall**, contra el paquete
+instalado, porque hay cosas que solo se ven ahí:
 
 ```sh
-scp spike/verify-client-conf.php spike/verify-mail.php spike/verify-peer-save.php admin@FIREWALL:/root/
+scp spike/verify-client-conf.php spike/verify-mail.php spike/verify-peer-save.php spike/verify-version.php admin@FIREWALL:/root/
 ssh admin@FIREWALL 'php /root/verify-client-conf.php'   # el .conf contra awg(8)
 ssh admin@FIREWALL 'php /root/verify-mail.php'          # el mail contra PEAR Mail
 ssh admin@FIREWALL 'php /root/verify-peer-save.php'     # el alta de un peer entera
+ssh admin@FIREWALL 'php /root/verify-version.php'       # la sonda de version y el filtrado
 ```
 
 La del mail no manda ningún mensaje: el único envío que intenta va contra
@@ -175,7 +176,7 @@ ese lista un renglón por túnel, y este uno por peer —quién está conectado,
 dónde y cuándo se lo vio— con umbral de actividad configurable y la opción de
 mostrar también los desconectados.
 
-Verificado en los dos lados: 75 tests de lógica en `tools/test-client-conf.php`,
+Verificado en los dos lados: 89 tests de lógica en `tools/test-client-conf.php`,
 y 36 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
 `awg(8)` parsee el archivo generado —con control negativo—, que todo lo que se
 calcula del túnel aguante una instalación sin ningún túnel, y que lo detectado
@@ -229,12 +230,41 @@ que por el cuerpo viaje el `.conf` en texto y nunca el zip— y 25 contra el
 firewall con `spike/verify-mail.php`, que además prueba el error de un servidor
 que no contesta contra PEAR de verdad, sin mandar ningún mensaje.
 
+### El selector de versión
+
+Los 16 campos no van todos juntos: `S3`, `S4` e `I1`–`I5` los estrenó AmneziaWG
+2.0. Equivocarse no es un error suave —`awg(8)` aborta el `.conf` entero ante una
+clave que no conoce, y la app de Android rechaza el archivo completo con
+`UNKNOWN_ATTRIBUTE`—, así que el túnel simplemente no levanta y nada lo explica.
+
+Por eso el túnel tiene un selector de **compatibilidad**, y la pregunta que hace
+no es "qué versión tengo" sino **qué entiende el extremo más débil de este
+túnel**. Se puede elegir menos de lo que soporta el firewall, porque el otro
+extremo puede ser más viejo: la app estable de Android es 2.0.x y todo lo 3.x
+está publicado como *prerelease*.
+
+Lo que **no** se ofrece se dice y se explica por qué, con las dos razones
+separadas: hasta dónde llega el `awg` que va adentro del `.pkg` —detectado con
+una sonda, no preguntado— y hasta dónde sabe escribir este paquete. Hoy las dos
+dan 2.0.
+
+La decisión vive en `awg_obfuscation_pairs()`, no en la pantalla. Es la
+diferencia entre que ande y que parezca que anda: los campos escondidos se
+siguen guardando a propósito —para no borrarle al usuario valores que no vio— así
+que si el filtro viviera en la GUI, bajar un túnel de 2.0 a 1.x seguiría
+escribiendo su `S3` en los dos archivos mientras la pantalla dice 1.x.
+
+Verificado con 46 tests locales de validación, 89 del `.conf` del cliente y
+14 sobre el firewall (`spike/verify-version.php`), que incluyen el control
+negativo de la sonda y que los `.conf` de los dos niveles los parsee `awg(8)`.
+
 ### Próximo paso concreto
 
-**Un selector de versión 1.x / 2.0 en la página del túnel.** Hoy son 16 campos de
-ofuscación sin nada que indique cuáles van juntos, y equivocarse no es un error
-suave: `awg(8)` aborta el `.conf` entero ante una clave que no conoce, así que el
-túnel simplemente no levanta.
+**Auto-relleno sorteado por túnel** para los campos que hoy quedan vacíos. Es
+requisito de publicar: si el paquete trajera plantillas fijas, toda instalación
+emitiría los mismos bytes, y eso es una firma peor que no ofuscar. La gramática
+de los `I1`–`I5` está documentada en `docs/amneziawg-2.0.md`; el ejemplo que
+publica Amnezia es justamente lo único que no hay que copiar.
 
 ## Por dónde empezar
 

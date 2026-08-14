@@ -169,17 +169,41 @@ function awg_validate_tunnel_post($pconfig, $idx_from_post) {
 /*
  * Valida los 16 parametros de ofuscacion.
  *
- * Se valida el rango de todos los campos siempre, incluso los de AWG 2.0
- * contra un backend 1.x. Lo que NO se hace es rechazar un campo 2.0 por correr
- * contra un backend viejo: el valor puede venir de otro firewall o de un
- * backend que se actualice despues, y bloquear el save obligaria a borrarlo
- * para poder tocar cualquier otra cosa del tunel. Que no llegue al .conf ya lo
- * garantiza awg_make_tunnel_conf_file(), que es donde importa.
+ * Se valida el rango de todos los campos siempre, sin importar el nivel elegido
+ * ni el del backend. Lo que NO se hace es rechazar un campo por estar arriba de
+ * ese nivel: el valor puede venir de otro firewall, o de un backend que se
+ * actualice despues, y bloquear el save obligaria a borrarlo para poder tocar
+ * cualquier otra cosa del tunel. Que no llegue a ningun .conf ya lo garantiza
+ * awg_obfuscation_pairs(), que es donde importa.
  */
 function awg_validate_obfuscation($pconfig) {
 	global $awgg;
 
 	$input_errors = array();
+
+	/*
+	 * El nivel del tunel. Se rechaza uno que no existe o que esta por encima del
+	 * techo, porque eso solo puede venir de un POST armado a mano o de una
+	 * pantalla vieja: el desplegable no ofrece nada mas alto.
+	 *
+	 * Lo que NO se rechaza es un valor guardado que quedo alto despues de un
+	 * downgrade. Eso lo baja awg_tunnel_version() en silencio al escribir, que
+	 * es lo unico que hace falta: bloquear el save dejaria un tunel restaurado
+	 * de otro firewall imposible de editar hasta adivinar cual es el campo malo.
+	 */
+	$version = trim((string) ($pconfig['awgversion'] ?? ''));
+
+	if ($version !== '') {
+		$ceiling = awg_version_ceiling();
+
+		if (!isset($awgg['awg_versions'][$version])) {
+			$input_errors[] = gettext('The AmneziaWG compatibility level is not one this package knows.');
+		} else if ((int) $version > $ceiling) {
+			$input_errors[] = sprintf(
+				gettext('This firewall cannot go past %s.'),
+				$awgg['awg_versions'][$ceiling]['label']);
+		}
+	}
 
 	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
 		$value = trim((string) $pconfig[$field]);
