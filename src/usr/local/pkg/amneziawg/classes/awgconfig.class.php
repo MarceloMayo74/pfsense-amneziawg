@@ -38,6 +38,24 @@ class awgconfig {
 	private const VALID_SECTIONS		= array(
 							'interface' => self::INTERFACE_ATTR,
 							'peer' => self::PEER_ATTR);
+
+	/*
+	 * Atributos donde "0" es un valor y no un campo vacio.
+	 *
+	 * empty("0") es true en PHP, asi que sin esta lista el escritor los tira en
+	 * silencio. El paquete nativo ya tenia la excepcion para
+	 * PersistentKeepalive; los de ofuscacion son la misma clase de cosa --
+	 * cuentan bytes, y cero quiere decir "sin relleno"--.
+	 *
+	 * Importa mas de lo que parece: el .conf del cliente NO pasa por esta clase,
+	 * asi que un S4 = 0 salia escrito para el cliente y desaparecia del lado del
+	 * servidor. Los dos archivos tienen que decir lo mismo, que es el invariante
+	 * sobre el que se apoya todo lo demas.
+	 */
+	private const ZERO_IS_A_VALUE		= array(
+							'PersistentKeepalive',
+							'Jc', 'Jmin', 'Jmax',
+							'S1', 'S2', 'S3', 'S4');
 	protected $tunnel_path;
 
 	protected $lines			= array();
@@ -272,9 +290,9 @@ class awgconfig {
 
 		$value_is_valid = !empty($value);
 
-		// Keepalive can have a valid value of "0" (disabled) which empty() above will mark as false.
-		// So mark it as valid for this case
-		if ($attr == "PersistentKeepalive" && $value == "0") {
+		// Hay atributos donde "0" es un valor, y empty() los da por vacios.
+		if (((string) $value === '0') &&
+		    in_array($attr, self::ZERO_IS_A_VALUE, true)) {
 			$value_is_valid = true;
 		}
 
