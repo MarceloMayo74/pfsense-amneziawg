@@ -8,6 +8,12 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
+> **Probado sólo en pfSense CE 2.9.0-BETA (FreeBSD 16), amd64.** Es la única
+> versión sobre la que corrió, y sobre un solo firewall. En 2.8.1 (FreeBSD 15)
+> no se probó y no se publica un `.pkg`: el que hay declara el ABI
+> `FreeBSD:16:amd64`, así que `pkg add` lo rechaza ahí en vez de instalar algo
+> que nadie verificó. El detalle de por qué, en [Objetivo](#objetivo).
+
 > **Estado: fase 6 terminada.** El paquete instala, tiene los 16 campos de
 > ofuscación, levanta y baja túneles desde la GUI supervisando un proceso
 > `amneziawg-go` por túnel, tiene watchdog para los que se caen solos, y entrega
