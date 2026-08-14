@@ -442,7 +442,17 @@ que la lee.
 
 ## 11. Riesgos abiertos
 
-### Multi-WAN: el túnel solo anda sobre la WAN del default gateway
+### Resuelto: multi-WAN, el túnel solo andaba sobre la WAN del default gateway
+
+> **Arreglado el 14-08-2026** portando sticky sockets a FreeBSD en
+> `amneziawg-go` — el TODO de upstream. El detalle del port, sus mediciones y
+> sus tests están en [plan-sticky-freebsd.md](plan-sticky-freebsd.md); el
+> parche en `patches/amneziawg-go/`. Verificado: el cliente conecta por las dos
+> WAN, en pf queda un solo estado, y las respuestas salen por la interfaz
+> correcta. **Sin reglas de firewall agregadas**, que era la condición.
+>
+> Se deja el diagnóstico entero abajo porque el síntoma es difícil de leer y
+> puede volver con otro binario, u otro BSD donde el port no esté.
 
 Medido el 14-08-2026 sobre el firewall, que tiene dos WAN: `pppoe0`
 (198.51.100.1, a donde apunta el dyndns) e `igb0` (192.168.0.117, **que tiene
@@ -487,21 +497,21 @@ explícitamente. Corriendo `wireguard-go` en vez del módulo, WireGuard fallarí
 igual. La ofuscación no interviene: la falla es en la capa de sockets, debajo
 del protocolo.
 
-Es un costo nuevo de la decisión de la sección 2, al lado del 2,5x de CPU: **con
-`if_amn.ko` cargando, esto no pasaría.**
+Era un costo de la decisión de la sección 2 —userspace porque `if_amn.ko` no
+carga—, al lado del 2,5x de CPU. **Se eligió la cuarta salida**, que es la única
+que no le traslada el problema al usuario: portar sticky sockets a FreeBSD. Las
+otras tres se descartaron y conviene saber por qué, porque cada una parece
+razonable de a una:
 
-Cuatro salidas, ninguna gratis:
-
-| | qué implica |
+| | por qué no |
 |---|---|
-| Default gateway en la WAN del túnel | anda ya; cambia por dónde sale todo el tráfico |
-| Publicar el túnel por la WAN del default gateway | no toca el ruteo; hace falta port forward aguas arriba |
-| Regla flotante `route-to` + NAT de salida con static-port | anda, es frágil, hay que documentarlo |
-| Portar sticky sockets a FreeBSD en `amneziawg-go` | el arreglo de verdad, y es el TODO de upstream |
+| Default gateway en la WAN del túnel | cambia por dónde sale todo el tráfico del firewall para arreglar una VPN |
+| Publicar el túnel por la WAN del default gateway | obliga a un port forward aguas arriba y a elegir WAN por el bug, no por la red |
+| Regla flotante `route-to` + NAT de salida con static-port | anda, pero le pide a cada usuario con doble WAN dos reglas que no tienen que ver con su red |
 
-Mientras no se resuelva, el selector de endpoint debería avisar cuando la
-dirección elegida no es la de la WAN que tiene el default gateway, que es el
-único momento en que alguien lo va a leer.
+Las tres son configuración que el usuario tendría que descubrir a partir de un
+síntoma que no deja ni una línea de log. Un paquete que se publica no puede
+pedir eso.
 
 - **Estabilidad de los procesos go a largo plazo.** El watchdog de la fase 5
   existe justamente porque el plugin de OPNsense consideró necesario tenerlo.

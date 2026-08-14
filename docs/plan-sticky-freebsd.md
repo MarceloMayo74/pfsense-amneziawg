@@ -1,9 +1,8 @@
 # Sticky sockets para FreeBSD en amneziawg-go
 
-> **Estado al 14-08-2026: fases 1 a 4 hechas, salvo la prueba final con un
-> cliente remoto.** El parche está escrito, compila, y sus tests pasan sobre el
-> kernel del firewall. Falta el experimento de control: el teléfono discando a
-> la WAN que **no** tiene el default gateway.
+> **Estado al 14-08-2026: RESUELTO y verificado de punta a punta.** El teléfono
+> conecta por **las dos WAN**, incluida la que no tiene el default gateway.
+> Queda solo la fase 5, mandarlo upstream.
 
 **Objetivo.** Que `amneziawg-go` responda desde la misma dirección por la que
 llegó el paquete, como hace `if_wg` en el kernel. Con eso el paquete anda en
@@ -79,11 +78,21 @@ mismo truco que usa la implementación de Linux guardando el cmsg crudo en
      descarte (`tun9099`), comprueba socket UAPI e interfaz, y lo baja con
      SIGTERM. Si algún `setsockopt` fallara, `Open()` abortaría y no habría
      interfaz.
-   - **Lo que falta, y es la prueba de verdad ⬜:** el teléfono discando a
-     `mayosystems.duckdns.org:51822` —la WAN PPPoE, que NO tiene el default
-     gateway— tiene que completar el handshake. Es el experimento de control
-     exacto que fallaba y que con `mayocasa` (la WAN del default) ya andaba.
-     En pf debe quedar **un** estado, no los dos de antes.
+   - **La prueba de verdad ✅:** el teléfono conecta por **las dos WAN**. Con el
+     peer de `mayosystems` —la PPPoE, que NO tiene el default gateway— el
+     handshake cierra y pasa tráfico real (1,25 MiB en la primera prueba).
+
+     Las tres predicciones se cumplieron:
+
+     | | antes | después |
+     |---|---|---|
+     | estados de pf | dos: uno entrante y uno saliente por `igb0` con origen `192.168.0.117` | **uno**, `pppoe0 udp 198.51.100.1:51822 <- cliente`, `MULTIPLE:MULTIPLE` |
+     | salida en `pppoe0` | cero paquetes en 4 minutos | `198.51.100.1.51822 > cliente` |
+     | handshake | `never`, con los contadores moviéndose | cierra en el primer intento |
+
+     El estado único es lo que importa estructuralmente: la respuesta ahora
+     matchea el estado de la regla de WAN, así que el `reply-to` que pfSense ya
+     pone la rutea sola. Sin reglas agregadas.
 
 5. **Upstream.** Preparar el parche como PR a `amnezia-vpn/amneziawg-go`
    (aplica idéntico a `wireguard-go`, que es de donde viene el archivo). Hasta

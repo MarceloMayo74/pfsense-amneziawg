@@ -248,7 +248,16 @@ Lo que ya está resuelto ahí:
 
 - **Userspace, no kernel.** El módulo `if_amn.ko` de los ports de FreeBSD no
   carga en pfSense y nunca va a cargar de forma confiable — se publica pineado a
-  un `__FreeBSD_version` exacto. Se usa `amneziawg-go`.
+  un `__FreeBSD_version` exacto. Se usa `amneziawg-go`, con un parche propio
+  (ver abajo).
+- **Sticky sockets, para que ande con doble WAN.** `amneziawg-go` hereda de
+  `wireguard-go` una limitación que solo se nota en firewalls multi-WAN: no
+  responde desde la dirección por la que le hablaron, así que un cliente que
+  disca a una WAN que no tiene el default gateway nunca completa el handshake
+  —y no hay ni un error en ningún log—. El módulo de kernel de WireGuard no
+  tiene el problema porque vive adentro de la pila de red. Está portado a
+  FreeBSD en `patches/amneziawg-go/`, medido y con tests que corren sobre el
+  firewall: [docs/plan-sticky-freebsd.md](docs/plan-sticky-freebsd.md).
 - **Interfaces `tun9000`–`tun9999`.** Es lo que hace que pfSense las liste en
   Interfaces → Assignments sin parchear la base.
 - **Los 16 parámetros de ofuscación** con sus rangos y validaciones, incluida la
