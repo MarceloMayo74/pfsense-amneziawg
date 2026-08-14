@@ -143,6 +143,19 @@ $awgg = array(
 	'default_mtu'				=> 1420,
 	'default_port'				=> 51820,
 	'default_resolve_interval'		=> 300,
+
+	/*
+	 * Watchdog. Cada cuantos minutos corre el cron, y cuanto espera antes de
+	 * reintentar un tunel que no arranca.
+	 *
+	 * El backoff existe porque un tunel que no puede levantar -- puerto tomado,
+	 * clave invalida -- si no reintentaria cada minuto para siempre, y cada
+	 * intento cuesta hasta 5 segundos esperando el socket. Se duplica hasta el
+	 * tope y se limpia solo en cuanto el tunel arranca.
+	 */
+	'default_watchdog_interval'		=> 5,
+	'watchdog_backoff_min'			=> 60,
+	'watchdog_backoff_max'			=> 3600,
 	'default_widget_activity_threshold'	=> 120,
 	'default_widget_refresh_interval'	=> 20,
 	'max_port'				=> 65535,
@@ -222,6 +235,14 @@ $awgg['subsystems']		= array(
 					'awg' => $awgg['subsystem_prefix'], 
 					'postboot' => "{$awgg['subsystem_prefix']}_postboot");
 $awgg['awg_daemon'] 		= "{$awgg['php_awg']} -f {$awgg['awg_includes']}/awg_service.inc";
+
+/*
+ * El watchdog es el mismo script del servicio con otro verbo, invocado por
+ * cron. Corre y termina: no es un proceso mas que despues habria que vigilar.
+ */
+$awgg['watchdog_cmd']		= "{$awgg['awg_daemon']} watchdog";
+$awgg['watchdog_state']		= "{$awgg['run_path']}/watchdog.state";
+$awgg['watchdog_lock']		= "{$awgg['run_path']}/watchdog.lock";
 
 $awgg['shellcmdentries']		= array(
 					array(

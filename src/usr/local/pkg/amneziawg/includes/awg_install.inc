@@ -64,6 +64,10 @@ function awg_install() {
 
 	awg_defaults_install();
 
+	update_status("done.\n  Synchronising the AmneziaWG watchdog cron job...");
+
+	awg_watchdog_cron_sync();
+
 	update_status("done.\n");
 }
 
@@ -71,6 +75,10 @@ function awg_install() {
  * This is the main deinstall hook
  */
 function awg_deinstall() {
+	// awg_globals() puebla la global, pero sin esto $awgg aca adentro es una
+	// variable local sin definir.
+	global $awgg;
+
 	awg_globals();
 
 	update_status("  Removing AmneziaWG early shell commands...");
@@ -82,6 +90,14 @@ function awg_deinstall() {
 
 	// Removes the 'AmneziaWG' interface group
 	awg_ifgroup_deinstall();
+
+	update_status("done.\n  Removing the AmneziaWG watchdog cron job...");
+
+	/*
+	 * Sin esto queda una entrada de cron apuntando a un script que ya no
+	 * existe, corriendo cada pocos minutos para siempre.
+	 */
+	awg_watchdog_cron_deinstall();
 
 	update_status("done.\n  Removing AmneziaWG temporary files...");
 
@@ -178,6 +194,18 @@ function awg_defaults_install() {
 
 	if (config_get_path('installedpackages/amneziawg/config/0/hide_peers') === null) {
 		config_set_path('installedpackages/amneziawg/config/0/hide_peers', 'yes');
+		$config_changed = true;
+	}
+
+	// El watchdog arranca apagado: reviving cosas sin que nadie lo haya pedido
+	// no es un default razonable.
+	if (config_get_path('installedpackages/amneziawg/config/0/watchdog') === null) {
+		config_set_path('installedpackages/amneziawg/config/0/watchdog', 'no');
+		$config_changed = true;
+	}
+
+	if (config_get_path('installedpackages/amneziawg/config/0/watchdog_interval') === null) {
+		config_set_path('installedpackages/amneziawg/config/0/watchdog_interval', $awgg['default_watchdog_interval']);
 		$config_changed = true;
 	}
 

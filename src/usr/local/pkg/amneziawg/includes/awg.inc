@@ -403,6 +403,8 @@ function awg_do_settings_post($post) {
 	$pconfig['interface_group']		= empty($post['interface_group']) ? 'all' : $post['interface_group'];
 	$pconfig['hide_secrets']		= empty($post['hide_secrets']) ? 'no' : $post['hide_secrets'];
 	$pconfig['hide_peers']			= empty($post['hide_peers']) ? 'no' : $post['hide_peers'];
+	$pconfig['watchdog']			= empty($post['watchdog']) ? 'no' : 'yes';
+	$pconfig['watchdog_interval']		= empty($post['watchdog_interval']) ? $awgg['default_watchdog_interval'] : $post['watchdog_interval'];
 
 	$input_errors = awg_validate_settings_post($pconfig);
 
@@ -411,6 +413,9 @@ function awg_do_settings_post($post) {
 
 		// Sync with configuration backend
 		awg_write_config('Saved package settings.', true);
+
+		// La entrada de cron tiene que seguir a la configuracion
+		awg_watchdog_cron_sync();
 
 		// Resync the package
 		awg_resync();

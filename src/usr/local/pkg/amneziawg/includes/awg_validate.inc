@@ -91,6 +91,18 @@ function awg_validate_settings_post($pconfig) {
 		$input_errors[] = "Invalid endpoint hostname resolve interval ({$resolve_interval}).";
 	}
 
+	/*
+	 * El intervalo del watchdog termina en el campo de minutos de un crontab,
+	 * como '*\/N'. Fuera de 1..60 la entrada no tendria sentido.
+	 */
+	$watchdog_interval = $pconfig['watchdog_interval'];
+
+	if (!empty($watchdog_interval) &&
+	    (!is_numericint($watchdog_interval) ||
+	     ($watchdog_interval < 1) || ($watchdog_interval > 60))) {
+		$input_errors[] = "Invalid watchdog interval ({$watchdog_interval}). It must be a whole number of minutes between 1 and 60.";
+	}
+
 	// Consumers expect an array
 	return $input_errors;
 }

@@ -190,6 +190,35 @@ $section->addInput($input = new Form_Select(
 ))->setHelp("{$s(gettext('Configures which AmneziaWG tunnels are members of the AmneziaWG interface group.'))}<br />
 	     <span class=\"text-danger\">{$s(gettext('Note:'))} </span> {$s(sprintf(gettext("Group firewall rules are evaluated before interface firewall rules. Default is '%s.'"), $interface_group_list['all']))}");
 
+/*
+ * Watchdog.
+ *
+ * Cada tunel es un proceso, asi que puede caerse solo sin que se caiga nada
+ * mas. El watchdog lo nota y lo vuelve a levantar sin tocar los otros.
+ */
+$group = new Form_Group(gettext('Watchdog'));
+
+$group->add(new Form_Checkbox(
+	'watchdog',
+	gettext('Watchdog'),
+	gettext('Restart tunnels that stop on their own'),
+	($pconfig['watchdog'] == 'yes')
+))->setHelp("{$s(gettext('A cron job checks each enabled tunnel and brings back any whose process is gone.'))}<br />
+	     <span class=\"text-danger\">{$s(gettext('Note:'))} </span> {$s(gettext('Tunnels you disabled, and everything else while the service is stopped, are left alone.'))}")
+  ->setWidth(5);
+
+$group->add(new Form_Input(
+	'watchdog_interval',
+	gettext('Check every'),
+	'number',
+	$pconfig['watchdog_interval'],
+	['min' => 1, 'max' => 60, 'placeholder' => $awgg['default_watchdog_interval']]
+))->setHelp("{$s(gettext('Minutes between checks, 1 to 60.'))}<br />
+	     {$s(sprintf(gettext('The default is %s. A tunnel that will not start is retried less and less often, up to an hour apart.'), $awgg['default_watchdog_interval']))}")
+  ->setWidth(4);
+
+$section->add($group);
+
 $form->add($section);
 
 $section = new Form_Section(gettext('User Interface Settings'));

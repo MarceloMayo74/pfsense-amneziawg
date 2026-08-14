@@ -68,8 +68,12 @@ if (isset($argv[1])) {
 			$ret_code = awg_service_cli_restart($serialize);
 			break;
 
+		case 'watchdog':
+			$ret_code = awg_watchdog();
+			break;
+
 		default:
-			fwrite(STDOUT, "Usage: {$awgg['awg_daemon']} {START|STOP|RESTART} [SERIALIZE]");
+			fwrite(STDOUT, "Usage: {$awgg['awg_daemon']} {START|STOP|RESTART|WATCHDOG} [SERIALIZE]");
 			$ret_code = 1;
 			break;
 	}
@@ -378,6 +382,189 @@ function awg_service_daemon() {
 
 	// Execute SIGTERM handler to exit gracefully
 	awg_daemon_sig_handler(SIGTERM);
+}
+
+/*
+ * Watchdog: levanta los tuneles que se cayeron solos.
+ *
+ * Lo corre cron, no el daemon. Un tunel se cae por su cuenta -- el proceso
+ * muere, o nunca llego a arrancar despues de un boot con algo todavia a medio
+ * configurar -- y hasta ahora nadie se enteraba hasta que alguien abria la GUI
+ * y tocaba Apply. Ni el paquete oficial de WireGuard ni el de referencia tienen
+ * esto; el plugin de OPNsense si, y de ahi salen las ideas.
+ *
+ * Lo que NO hace, que es la mitad del diseño: no revive nada que se haya bajado
+ * a proposito. En OPNsense eso se resuelve con flag files
+ * (amneziawg_stopped.flag); aca no hacen falta, porque "a proposito" ya son dos
+ * cosas que viven en la configuracion -- el servicio parado y el tunel en
+ * enabled=no -- y las dos se consultan abajo. Un watchdog que pelea contra el
+ * administrador es peor que no tenerlo.
+ */
+function awg_watchdog() {
+	global $awgg;
+
+	// El watchdog tiene que estar prendido explicitamente
+	if (config_get_path('installedpackages/amneziawg/config/0/watchdog') != 'yes') {
+		return 0;
+	}
+
+	// El paquete deshabilitado, o el servicio parado, son decisiones tomadas
+	if (!awg_is_service_enabled() || !awg_is_service_running()) {
+		return 0;
+	}
+
+	/*
+	 * Un solo watchdog a la vez. Levantar un tunel puede tardar hasta cinco
+	 * segundos esperando el socket, asi que con varios caidos una corrida se
+	 * puede pasar del intervalo del cron y pisarse con la siguiente.
+	 */
+	if (!($h_lock = @fopen($awgg['watchdog_lock'], 'a+'))) {
+		return 0;
+	}
+
+	if (!flock($h_lock, LOCK_EX | LOCK_NB)) {
+		fclose($h_lock);
+
+		return 0;
+	}
+
+	$state = awg_watchdog_state_get();
+
+	$now = time();
+
+	foreach (config_get_path('installedpackages/amneziawg/tunnels/item', []) as $tunnel) {
+		$if_name = $tunnel['name'];
+
+		// Un tunel deshabilitado no tiene que estar corriendo
+		if (!isset($tunnel['enabled']) || ($tunnel['enabled'] != 'yes')) {
+			unset($state[$if_name]);
+
+			continue;
+		}
+
+		if (awg_proc_is_running($if_name)) {
+			// Anda: se olvida cualquier historial de fallas
+			unset($state[$if_name]);
+
+			continue;
+		}
+
+		// Esta caido, pero puede estar en penitencia por no arrancar
+		if (isset($state[$if_name]['retry_after']) && ($now < $state[$if_name]['retry_after'])) {
+			continue;
+		}
+
+		awg_tunnel_sync_by_name($if_name);
+
+		if (awg_proc_is_running($if_name)) {
+			unset($state[$if_name]);
+
+			log_error(sprintf(gettext('AmneziaWG watchdog: brought %s back up.'), $if_name));
+		} else {
+			$failures = ($state[$if_name]['failures'] ?? 0) + 1;
+
+			$backoff = min($awgg['watchdog_backoff_min'] * (2 ** ($failures - 1)),
+				       $awgg['watchdog_backoff_max']);
+
+			$state[$if_name] = array('failures' => $failures, 'retry_after' => $now + $backoff);
+
+			log_error(sprintf(gettext('AmneziaWG watchdog: %1$s is down and did not come back (attempt %2$d); retrying in %3$d s.'),
+					  $if_name, $failures, $backoff));
+		}
+	}
+
+	awg_watchdog_state_put($state);
+
+	flock($h_lock, LOCK_UN);
+
+	fclose($h_lock);
+
+	return 0;
+}
+
+function awg_watchdog_state_get() {
+	global $awgg;
+
+	if (!file_exists($awgg['watchdog_state'])) {
+		return array();
+	}
+
+	$state = json_decode((string) @file_get_contents($awgg['watchdog_state']), true);
+
+	return is_array($state) ? $state : array();
+}
+
+function awg_watchdog_state_put($state) {
+	global $awgg;
+
+	safe_mkdir($awgg['run_path'], 0700);
+
+	if (empty($state)) {
+		unlink_if_exists($awgg['watchdog_state']);
+
+		return;
+	}
+
+	file_put_contents($awgg['watchdog_state'], json_encode($state));
+}
+
+/*
+ * Instala o saca la entrada de cron segun este configurado el watchdog.
+ *
+ * install_cron_job() busca por substring del comando, asi que reinstalar con
+ * otro intervalo actualiza la entrada existente en vez de duplicarla.
+ */
+function awg_watchdog_cron_sync() {
+	global $awgg;
+
+	/*
+	 * Sin comando no se toca cron, y esto no es paranoia: install_cron_job()
+	 * busca la entrada con strstr($item['command'], $command), y en PHP un
+	 * needle vacio matchea cualquier cosa. Con $command vacio y $active false,
+	 * borra el PRIMER cron del sistema. Paso de verdad -- se llevo
+	 * /usr/sbin/newsyslog -- porque awg_deinstall() no declaraba global $awgg
+	 * y pasaba null.
+	 */
+	if (empty($awgg['watchdog_cmd'])) {
+		log_error(gettext('AmneziaWG: refusing to touch cron with an empty command.'));
+
+		return false;
+	}
+
+	$enabled = (config_get_path('installedpackages/amneziawg/config/0/watchdog') == 'yes');
+
+	$interval = (int) config_get_path('installedpackages/amneziawg/config/0/watchdog_interval',
+					  $awgg['default_watchdog_interval']);
+
+	if (($interval < 1) || ($interval > 60)) {
+		$interval = $awgg['default_watchdog_interval'];
+	}
+
+	// Cada minuto es '*'; cada N es '*/N'. '*/1' tambien vale, pero '*' es lo
+	// que un administrador espera leer en el crontab.
+	$minute = ($interval == 1) ? '*' : "*/{$interval}";
+
+	install_cron_job($awgg['watchdog_cmd'], $enabled, $minute, '*', '*', '*', '*');
+
+	return true;
+}
+
+/*
+ * Saca la entrada de cron, para el deinstall. Lleva el mismo guard que
+ * awg_watchdog_cron_sync() y por el mismo motivo.
+ */
+function awg_watchdog_cron_deinstall() {
+	global $awgg;
+
+	if (empty($awgg['watchdog_cmd'])) {
+		log_error(gettext('AmneziaWG: refusing to touch cron with an empty command.'));
+
+		return false;
+	}
+
+	install_cron_job($awgg['watchdog_cmd'], false);
+
+	return true;
 }
 
 function awg_deregister_service_env() {
