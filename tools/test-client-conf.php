@@ -58,11 +58,44 @@ if (empty($fields)) {
 	exit(2);
 }
 
-eval('$awgg = array(' . rtrim($fields[0], ',') . ');');
+preg_match("/'max_address_probe'\s*=>\s*(\d+)/", $globals, $probe);
+
+if (empty($probe)) {
+	fwrite(STDERR, "No se pudo leer max_address_probe de awg_globals.inc\n");
+	exit(2);
+}
+
+eval('$awgg = array(' . rtrim($fields[0], ',') . ", 'max_address_probe' => {$probe[1]});");
+
+/*
+ * Stubs de las funciones de red de pfSense. Son aritmetica de enteros sobre
+ * IPv4 y se pueden escribir sin margen de interpretacion; lo que se prueba con
+ * ellas no es la aritmetica sino el recorrido: saltear la de red y la de
+ * broadcast, saltear las ocupadas, y no colgarse con una subred enorme.
+ */
+if (!function_exists('is_ipaddrv4')) {
+	function is_ipaddrv4($v) {
+		return (filter_var($v, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false);
+	}
+	function is_ipaddr($v) { return is_ipaddrv4($v) || (strpos((string) $v, ':') !== false); }
+	function is_subnet($v) {
+		$p = explode('/', (string) $v);
+		return (count($p) === 2) && is_ipaddrv4($p[0]) && ctype_digit($p[1]) && ($p[1] <= 32);
+	}
+	function gen_subnet($ip, $bits) {
+		return long2ip(ip2long($ip) & (($bits == 0) ? 0 : (-1 << (32 - $bits))));
+	}
+	function gen_subnet_max($ip, $bits) {
+		return long2ip(ip2long(gen_subnet($ip, $bits)) | (~(($bits == 0) ? 0 : (-1 << (32 - $bits))) & 0xFFFFFFFF));
+	}
+	function ip_after($ip) { return long2ip(ip2long($ip) + 1); }
+	function ip_less_than($a, $b) { return (ip2long($a) < ip2long($b)); }
+}
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_obfuscation_pairs'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_build_conf'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_conf_filename'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_pick_address'));
 
 $pass = $fail = 0;
 
@@ -238,6 +271,70 @@ check('una descripcion vacia cae al fallback',
 check('una descripcion toda invalida cae al fallback',
 	awg_client_conf_filename('///') === 'awgclient.conf',
 	awg_client_conf_filename('///'));
+
+printf("\n-- awg_client_pick_address() --\n\n");
+
+$v24 = array(array('address' => '10.10.10.1', 'mask' => '24'));
+
+check('en una /24 vacia da la primera utilizable',
+	awg_client_pick_address($v24, array()) === '10.10.10.1/32',
+	(string) awg_client_pick_address($v24, array()));
+
+check('saltea las ocupadas',
+	awg_client_pick_address($v24, array('10.10.10.1', '10.10.10.2', '10.10.10.3')) === '10.10.10.4/32',
+	(string) awg_client_pick_address($v24, array('10.10.10.1', '10.10.10.2', '10.10.10.3')));
+
+check('devuelve siempre una /32',
+	substr((string) awg_client_pick_address($v24, array('10.10.10.1')), -3) === '/32');
+
+check('no reparte la direccion de red',
+	strpos((string) awg_client_pick_address($v24, array()), '10.10.10.0/') === false);
+
+$v30 = array(array('address' => '192.168.5.1', 'mask' => '30'));
+
+check('en una /30 da la primera de las dos utilizables',
+	awg_client_pick_address($v30, array()) === '192.168.5.1/32',
+	(string) awg_client_pick_address($v30, array()));
+
+check('no reparte la de broadcast de una /30',
+	awg_client_pick_address($v30, array('192.168.5.1', '192.168.5.2')) === null,
+	(string) awg_client_pick_address($v30, array('192.168.5.1', '192.168.5.2')));
+
+check('una /31 no tiene lugar para un cliente',
+	awg_client_pick_address(array(array('address' => '10.0.0.0', 'mask' => '31')), array()) === null);
+
+check('una /32 tampoco',
+	awg_client_pick_address(array(array('address' => '10.0.0.5', 'mask' => '32')), array()) === null);
+
+check('una fila IPv6 se saltea sin romper',
+	awg_client_pick_address(array(array('address' => 'fd00::1', 'mask' => '64')), array()) === null);
+
+// Con la primera subred agotada tiene que pasar a la siguiente.
+$dos = array(array('address' => '192.168.5.1', 'mask' => '30'),
+             array('address' => '10.10.10.1',  'mask' => '24'));
+
+check('con la primera subred agotada sigue con la segunda',
+	awg_client_pick_address($dos, array('192.168.5.1', '192.168.5.2')) === '10.10.10.1/32',
+	(string) awg_client_pick_address($dos, array('192.168.5.1', '192.168.5.2')));
+
+check('sin ninguna fila devuelve null',
+	awg_client_pick_address(array(), array()) === null);
+
+/*
+ * Una subred grande con el principio entero ocupado tiene que cortar por el
+ * tope de sondeos y devolver null, no recorrer 65 000 direcciones.
+ */
+$muchas = array();
+for ($i = 0; $i < $awgg['max_address_probe'] + 10; $i++) {
+	$muchas[] = long2ip(ip2long('10.20.0.0') + 1 + $i);
+}
+
+$t0 = microtime(true);
+$grande = awg_client_pick_address(array(array('address' => '10.20.0.1', 'mask' => '16')), $muchas);
+$el = microtime(true) - $t0;
+
+check('una subred grande corta por el tope de sondeos', $grande === null, (string) $grande);
+check('y corta rapido', $el < 5.0, sprintf('%.1fs', $el));
 
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 

@@ -482,7 +482,12 @@ function awg_do_peer_post($post) {
 		}
 	}
 
-	return array('input_errors' => $input_errors, 'changes' => $changes, 'tuns_to_sync' => $tuns_to_sync, 'pconfig' => $pconfig);
+	/*
+	 * peer_idx sale para que quien guarda los datos de cliente sepa sobre que
+	 * peer escribirlos. Para un peer nuevo es el indice recien asignado, que
+	 * quien llama no tiene forma de saber sin recalcularlo.
+	 */
+	return array('input_errors' => $input_errors, 'changes' => $changes, 'tuns_to_sync' => $tuns_to_sync, 'pconfig' => $pconfig, 'peer_idx' => $peer_idx);
 }
 
 /*

@@ -145,6 +145,20 @@ $awgg = array(
 	'default_resolve_interval'		=> 300,
 
 	/*
+	 * Los datos del cliente viven en un sub-elemento del peer y no sueltos entre
+	 * sus campos: lo que el peer describe es el protocolo -- clave publica,
+	 * AllowedIPs que el servidor rutea hacia el cliente -- y lo que va aca
+	 * describe al cliente del otro lado, incluida su clave PRIVADA. Separarlos
+	 * evita chocar con los campos que escribe el guardado nativo del peer y hace
+	 * que "este peer se puede exportar" sea una pregunta de una sola linea.
+	 */
+	'client_store'				=> 'client',
+
+	// Tope de direcciones a probar buscando una libre, para que una /8 mal
+	// puesta no cuelgue la pagina.
+	'max_address_probe'			=> 4096,
+
+	/*
 	 * Watchdog. Cada cuantos minutos corre el cron, y cuanto espera antes de
 	 * reintentar un tunel que no arranca.
 	 *

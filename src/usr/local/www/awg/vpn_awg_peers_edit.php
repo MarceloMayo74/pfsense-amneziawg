@@ -34,6 +34,7 @@ require_once('guiconfig.inc');
 // AmneziaWG includes
 require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
+require_once('amneziawg/includes/awg_client.inc');
 
 global $awgg;
 
@@ -53,12 +54,49 @@ if (isset($_REQUEST['peer']) && is_numericint($_REQUEST['peer'])) {
 
 // All form save logic is in amneziawg/awg.inc
 if ($_POST) {
-	switch ($_POST['act']) {
+	/*
+	 * El boton de descarga es un submit del mismo formulario, cuyo act es
+	 * 'save'. Se distingue por su propio campo en vez de pisar el act con
+	 * javascript, que dejaria la descarga rota con el js deshabilitado.
+	 */
+	$act = isset($_POST['downloadconf']) ? 'download' : $_POST['act'];
+
+	switch ($act) {
 		case 'save':
+			/*
+			 * El par de claves del cliente se resuelve primero: la clave
+			 * publica del peer se deriva de la privada del cliente, y sin eso
+			 * la validacion nativa rechazaria el formulario por Public Key
+			 * vacio antes de que nadie genere nada.
+			 */
+			$client_errors = array();
+			$_POST = awg_client_prepare_post($_POST, $client_errors);
+
 			$res = awg_do_peer_post($_POST);
-			$input_errors = $res['input_errors'];
+			$input_errors = array_merge($client_errors, $res['input_errors']);
 			$pconfig = $res['pconfig'];
-	
+
+			/*
+			 * Los datos del cliente se guardan DESPUES y aparte: asi el camino
+			 * de validacion y sincronizacion del peer, que ya esta probado,
+			 * queda intacto y esto solo agrega un sub-elemento.
+			 */
+			if (empty($input_errors)) {
+				$store = awg_client_store_from_post($_POST, $pconfig['tun'], $input_errors);
+
+				if (empty($input_errors)) {
+					awg_client_save_store($res['peer_idx'], $store);
+				}
+			}
+
+			// Lo tipeado en la seccion de cliente tiene que volver a la
+			// pantalla si algo fallo, y eso no lo devuelve awg_do_peer_post().
+			foreach (array('client_enable', 'client_privatekey', 'client_address',
+			               'client_dns', 'client_mtu', 'client_allowedips',
+			               'client_endpoint', 'client_keepalive') as $field) {
+				$pconfig[$field] = $_POST[$field] ?? '';
+			}
+
 			if (empty($input_errors)) {
 				if (awg_is_service_running() && $res['changes']) {
 					// Everything looks good so far, so mark the subsystem dirty
@@ -80,6 +118,33 @@ if ($_POST) {
 			exit;
 			break;
 
+		case 'download':
+			/*
+			 * Se rearma en el momento desde lo guardado en el peer, en vez de
+			 * dejar el archivo en disco: la clave privada del cliente ya vive
+			 * en config.xml y una segunda copia en el filesystem solo agregaria
+			 * un lugar mas de donde se puede filtrar.
+			 */
+			$conf = awg_client_conf_from_peer($_POST['index'], $error);
+
+			if ($conf === false) {
+				$input_errors[] = $error;
+				break;
+			}
+
+			[$dl_idx, $dl_peer, $dl_is_new] = awg_peer_get_config($_POST['index'], false);
+
+			$filename = awg_client_conf_filename($dl_peer['descr']);
+
+			header('Content-Type: application/octet-stream');
+			header("Content-Disposition: attachment; filename=\"{$filename}\"");
+			header('Content-Length: ' . strlen($conf));
+			header('Cache-Control: no-store');
+
+			print($conf);
+			exit;
+			break;
+
 		default:
 			// Shouldn't be here, so bail out.
 			header('Location: /awg/vpn_awg_peers.php');
@@ -95,12 +160,35 @@ if (is_numericint($peer_idx) && is_array(config_get_path("installedpackages/amne
 	// Default to enabled
 	$pconfig['enabled'] = 'yes';
 
-	// Automatically choose a tunnel based on the request 
+	// Automatically choose a tunnel based on the request
 	$pconfig['tun'] = $tun_name;
 
 	// Default to a dynamic tunnel, so hide the endpoint form group
 	$is_dynamic = true;
 }
+
+/*
+ * Estado de la seccion de cliente. Al editar sale de lo guardado en el peer; en
+ * uno nuevo, de los valores que sirven para el caso normal -- todo el trafico
+ * por el tunel, la proxima direccion libre, y keepalive puesto porque un
+ * cliente que anda por ahi casi siempre esta detras de un NAT.
+ */
+if (!$_POST) {
+	$store = awg_client_store($pconfig);
+
+	$pconfig['client_enable']	= !empty($store['privatekey']) ? 'yes' : '';
+	$pconfig['client_privatekey']	= $store['privatekey'] ?? '';
+	$pconfig['client_dns']		= $store['dns'] ?? '';
+	$pconfig['client_mtu']		= $store['mtu'] ?? '';
+	$pconfig['client_endpoint']	= $store['endpoint'] ?? '';
+	$pconfig['client_address']	= $store['address']
+		?? (string) awg_client_next_address($pconfig['tun']);
+	$pconfig['client_allowedips']	= $store['allowedips'] ?? '0.0.0.0/0, ::/0';
+	$pconfig['client_keepalive']	= $store['persistentkeepalive'] ?? '25';
+}
+
+$client_exportable = !$is_new && awg_client_is_exportable(
+	config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}", array()));
 
 $shortcut_section = "amneziawg";
 
@@ -295,6 +383,104 @@ $section->addInput(new Form_Button(
 	null,
 	'fa-solid fa-plus'
 ))->addClass('btn-success btn-sm addbtn');
+
+$form->add($section);
+
+/*
+ * Configuracion del cliente.
+ *
+ * Esta aca adentro y no en una pagina aparte porque la pagina de peer es de
+ * este paquete: crear el peer y obtener el archivo del cliente son el mismo
+ * acto, y separarlos obliga a repetir el tunel, la direccion y las claves.
+ *
+ * La clave privada del cliente queda guardada en config.xml, que es lo que
+ * permite volver a bajar el archivo despues. Es una decision con costo: quien
+ * pueda leer la configuracion del firewall puede suplantar al cliente. La
+ * alternativa -- generarla y no guardarla -- da una sola oportunidad de
+ * descargar y ninguna de rehacerlo.
+ */
+$section = new Form_Section('Client Configuration');
+
+$section->addInput(new Form_Checkbox(
+	'client_enable',
+	'Generate',
+	gettext('Generate a client configuration for this peer'),
+	$pconfig['client_enable'] == 'yes'
+))->setHelp('Keeps the client side settings needed to hand this peer a ready to import file, ' .
+            'including the obfuscation parameters of its tunnel.<br />' .
+            '<span class="text-danger">Note: </span>this stores the client private key in the firewall configuration.');
+
+$section->addInput(new Form_Input(
+	'client_privatekey',
+	'Client Private Key',
+	awg_secret_input_type(),
+	$pconfig['client_privatekey'],
+	['autocomplete' => 'new-password']
+))->addClass('trim')
+  ->setHelp('Leave blank to generate one. The matching public key goes in the Public Key field above.');
+
+$section->addInput(new Form_Input(
+	'client_address',
+	'Client Address',
+	'text',
+	$pconfig['client_address'],
+	['placeholder' => '10.0.0.2/32']
+))->addClass('trim')
+  ->setHelp('Address the client assigns to its own interface. Leave blank for the next free one on the tunnel.');
+
+$section->addInput(new Form_Input(
+	'client_allowedips',
+	'Client Allowed IPs',
+	'text',
+	$pconfig['client_allowedips'],
+	['placeholder' => '0.0.0.0/0, ::/0']
+))->addClass('trim')
+  ->setHelp('What the client routes into the tunnel. Everything by default; narrow it for a split tunnel.');
+
+$section->addInput(new Form_Input(
+	'client_endpoint',
+	'Client Endpoint',
+	'text',
+	$pconfig['client_endpoint'],
+	['placeholder' => 'vpn.example.com:51820']
+))->addClass('trim')
+  ->setHelp('Host and port the client uses to reach this firewall, as seen from the outside.');
+
+$section->addInput(new Form_Input(
+	'client_dns',
+	'Client DNS',
+	'text',
+	$pconfig['client_dns'],
+	['placeholder' => 'DNS']
+))->addClass('trim')
+  ->setHelp('Optional. Comma separated.');
+
+$section->addInput(new Form_Input(
+	'client_mtu',
+	'Client MTU',
+	'text',
+	$pconfig['client_mtu'],
+	['placeholder' => $awgg['default_mtu']]
+))->addClass('trim')
+  ->setHelp('Optional.');
+
+$section->addInput(new Form_Input(
+	'client_keepalive',
+	'Client Keep Alive',
+	'text',
+	$pconfig['client_keepalive'],
+	['placeholder' => '25']
+))->addClass('trim')
+  ->setHelp('Interval in seconds the client uses to hold a NAT mapping open. Blank or 0 disables it.');
+
+if ($client_exportable) {
+	$section->addInput(new Form_StaticText(
+		gettext('Download'),
+		'<button type="submit" name="downloadconf" id="downloadconf" class="btn btn-primary btn-sm" ' .
+		'value="download" formnovalidate><i class="fa-solid fa-download icon-embed-btn"></i>' .
+		gettext('Download') . '</button>'
+	))->setHelp('Downloads the .conf as it is saved right now, not as it is shown above. Save first to include any change.');
+}
 
 $form->add($section);
 

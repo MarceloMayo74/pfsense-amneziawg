@@ -110,15 +110,23 @@ página de peers que ya existe**, no en un módulo aparte: wgeasy tiene que
 atornillarse por afuera porque no puede tocar el paquete oficial de WireGuard,
 pero acá la página de peer es propia.
 
-Empezada. El núcleo de generación está hecho y con tests
-(`awg_client_build_conf()` en `awg_client.inc`, 32 tests): arma el `.conf` con
-la ofuscación del túnel, respeta la versión del backend y se niega a generar un
-archivo al que le falte algo sin lo cual el cliente no conectaría. La ofuscación
-sale de `awg_obfuscation_pairs()`, la misma función que escribe el `.conf` del
-servidor, para que los dos extremos no puedan divergir.
+Empezada, y ya se puede usar: la página de peers tiene una sección **Client
+Configuration** que guarda los datos del cliente sobre el peer, sortea el par de
+claves —la pública del peer se **deriva** de la privada del cliente, para que no
+puedan no corresponderse—, sugiere la próxima dirección libre del túnel y
+descarga el `.conf` armado en el momento.
 
-Falta la interfaz: campos del cliente en la página de peer, par de claves,
-dirección libre, endpoint, QR, descarga en zip y envío por mail.
+La ofuscación del cliente sale de `awg_obfuscation_pairs()`, la misma función
+que escribe el `.conf` del servidor: los dos extremos tienen que ofuscar
+idéntico o no hay handshake, y dos copias del mismo bucle se desincronizan sin
+que falle nada hasta que un cliente no conecta.
+
+Verificado en los dos lados: 45 tests de lógica en `tools/test-client-conf.php`,
+y 8 contra el binario real en el firewall con `spike/verify-client-conf.php`,
+que comprueba que `awg(8)` parsee el archivo generado y —control negativo— que
+rechace uno con una clave inventada.
+
+Falta el QR, el zip y el envío por mail.
 
 ## Por dónde empezar
 
