@@ -8,9 +8,9 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: fase 4 terminada.** El paquete instala, tiene los 16 campos de
-> ofuscación, y ya levanta y baja túneles desde la GUI supervisando un proceso
-> `amneziawg-go` por túnel.
+> **Estado: fase 5 terminada.** El paquete instala, tiene los 16 campos de
+> ofuscación, levanta y baja túneles desde la GUI supervisando un proceso
+> `amneziawg-go` por túnel, y tiene watchdog para los que se caen solos.
 
 ## Estado por fase
 
@@ -20,8 +20,8 @@ firma.
 | 2 | Esqueleto del paquete | ✅ instalado y verificado en 2.9.0-BETA el 13-08-2026 |
 | 3 | Los 16 campos de ofuscación | ✅ verificados de punta a punta el 13-08-2026 |
 | 4 | Supervisión de los procesos | ✅ 6 propiedades verificadas el 13-08-2026 |
-| 5 | Watchdog | ⬜ el que sigue |
-| 6 | Integración con wgeasy | — |
+| 5 | Watchdog | ✅ 20 propiedades verificadas el 13-08-2026 |
+| 6 | Integración con wgeasy | ⬜ el que sigue |
 
 Lo verificado en la fase 2, sobre el firewall: `pkg add` corre `awg_install()`
 entero, las dos entradas de menú quedan registradas, las cuatro páginas y el JS
@@ -59,13 +59,31 @@ proceso destruye la interfaz **solo con `SIGTERM`**. Con `SIGKILL` quedan
 colgados el socket y la interfaz, así que un túnel caído parecía estar vivo.
 Está en `docs/arquitectura.md`, sección 11.
 
+De la fase 5: el watchdog es un cron (`VPN → AmneziaWG → Settings`, apagado por
+defecto) que revive los túneles cuyo proceso desapareció. La mitad del diseño
+es lo que **no** hace: no toca un túnel que vos deshabilitaste ni arranca nada
+con el servicio parado. Un túnel que no logra arrancar se reintenta cada vez
+más espaciado, hasta una hora, y se olvida en cuanto levanta.
+
+### Herramientas de verificación
+
+```sh
+.tools\php\php.exe tools\test-obfuscation.php   # 38 tests de validación
+sh tools/check-collisions.sh                    # símbolos globales vs WireGuard
+sh tools/check-globals.sh                       # $awgg sin declarar global
+```
+
+El último existe porque esa clase de bug borró un cron del sistema en un
+firewall de verdad. Ver la fase 5 en `docs/arquitectura.md`.
+
 ### Próximo paso concreto
 
-**Fase 5: watchdog.** Detectar un túnel caído y relevantarlo por cron, sin
-esperar a que alguien toque Apply. La fase 4 dejó lo necesario para eso:
-`awg_proc_pid()` dice si un túnel está vivo de verdad y `awg_tunnel_sync_by_name()`
-lo revive sin tocar los demás. Ni el paquete oficial de WireGuard ni el de
-referencia tienen watchdog; el plugin de OPNsense sí.
+**Fase 6: integración con wgeasy.** Generación de configs de cliente con QR,
+zip y mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de
+las referencias tiene y la que hace usable el modo servidor.
+
+Antes de eso conviene medir el throughput real de `amneziawg-go` en el hardware
+objetivo, que sigue pendiente desde la fase 1: se validó latencia, no caudal.
 
 ## Por dónde empezar
 

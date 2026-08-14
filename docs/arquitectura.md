@@ -350,9 +350,42 @@ trampa de `H1`–`H4` como texto.
 **Fase 4 — Supervisión.** `awg_service.inc` como supervisor de N procesos go:
 arranque al boot, parada ordenada, reinicio de un túnel sin tocar los otros.
 
-**Fase 5 — Watchdog.** Detección de túnel caído y relevantamiento, por cron.
-Ni el paquete oficial de WireGuard ni el de referencia lo tienen; el plugin de
-OPNsense sí, y vale robarle la idea.
+**Fase 5 — Watchdog. ✅ Terminada el 13-08-2026.** Detección de túnel caído y
+relevantamiento, por cron. Ni el paquete oficial de WireGuard ni el de
+referencia lo tienen; el plugin de OPNsense sí, y se le robaron cuatro ideas:
+flag de habilitado, no revivir lo que se bajó a propósito, recuperación
+granular, y guarda contra loops de reinicio.
+
+Dos de esas salieron distintas acá. OPNsense marca "parado a propósito" con
+flag files (`amneziawg_stopped.flag`); en pfSense eso ya son dos cosas que
+viven en la configuración —el servicio parado y el túnel en `enabled=no`— así
+que no hacen falta archivos. Y la guarda de OPNsense es un chequeo del módulo
+de kernel, que acá no aplica: se reemplazó por backoff exponencial por túnel,
+de 60 s a 1 h, que se limpia solo en cuanto el túnel levanta.
+
+El watchdog corre y termina; no es un proceso más que después habría que
+vigilar. Toma un lock, porque levantar un túnel puede tardar 5 s esperando el
+socket y con varios caídos una corrida se pasa del intervalo del cron.
+
+### La trampa que dejó esta fase: `$awgg` sin declarar
+
+`awg_deinstall()` llamaba `awg_globals()` y después leía `$awgg['watchdog_cmd']`
+**sin `global $awgg;`**. En PHP eso no es la global: es una local vacía. Sin
+error ni warning útil.
+
+El valor nulo llegó a `install_cron_job($command, false)`, que busca la entrada
+con `strstr($item['command'], $command)`. Un needle vacío matchea, así que en
+vez de no hacer nada **borró el primer cron del sistema** — se llevó
+`/usr/sbin/newsyslog` de un firewall de verdad, y la rotación de logs con él.
+
+Dos defensas, porque una sola no alcanza:
+
+- `tools/check-globals.sh` busca la clase entera: cualquier función que use
+  `$awgg` sin declararlo. Llamar `awg_globals()` no alcanza y es justo lo que
+  engaña, porque puebla la global pero no el scope local.
+- Las funciones que tocan cron se niegan a hacerlo con el comando vacío. Ahí el
+  argumento no es de estilo: con `$active` en false, un comando vacío no es
+  inocuo sino destructivo.
 
 **Fase 6 — Integración con wgeasy.** Generación de configs de cliente con QR,
 zip y mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de
