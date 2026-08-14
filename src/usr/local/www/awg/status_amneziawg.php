@@ -168,9 +168,11 @@ if (!empty($a_devices)):
 					 * pagina nativa -- hace parecer que el puerto configurado
 					 * se perdio.
 					 */
-					$dialin = awg_client_dialin_endpoint($peer['config']);
+					$dialin = awg_client_dialin_endpoint($peer['config'], true);
 ?>
-									<td><?=htmlspecialchars($dialin ?? awg_format_endpoint(false, $peer['config']))?></td>
+									<td title="<?=htmlspecialchars(awg_client_dialin_endpoint($peer['config']) ?? '')?>">
+										<?=htmlspecialchars($dialin ?? awg_format_endpoint(false, $peer['config']))?>
+									</td>
 									<td><?=htmlspecialchars(empty($peer['endpoint']) ? gettext('not connected') : $peer['endpoint'])?></td>
 									<td><?=awg_generate_peer_allowedips_popup_link(awg_peer_get_array_idx($peer['config']['publickey'], $peer['config']['tun']))?></td>
 									<td><?=htmlspecialchars(format_bytes($peer['transfer_rx']))?></td>

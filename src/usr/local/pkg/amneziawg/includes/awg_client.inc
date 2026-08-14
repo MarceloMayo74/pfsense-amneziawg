@@ -509,16 +509,32 @@ function awg_client_conf_from_peer($peer_idx, &$error = null) {
  * handshake y cambia en cada reconexion. Son dos cosas distintas y por eso van
  * en dos columnas distintas.
  *
+ * Con $resolve, un hostname se muestra como la IP a la que resuelve AHORA,
+ * que es como lo muestra la pagina de estado de WireGuard. No es cosmetica:
+ * si el dyndns quedo apuntando viejo, aca se ve la IP equivocada al lado del
+ * handshake que no cierra. Si no resuelve, queda el hostname.
+ *
  * Devuelve null si el peer no tiene cliente generado.
  */
-function awg_client_dialin_endpoint($peer) {
+function awg_client_dialin_endpoint($peer, $resolve = false) {
 	$store = awg_client_store($peer);
 
 	$host = trim((string) ($store['endpoint'] ?? ''));
 
-	return ($host === '')
-		? null
-		: awg_client_format_endpoint($host, $store['port'] ?? '');
+	if ($host === '') {
+		return null;
+	}
+
+	if ($resolve && !is_ipaddr($host)) {
+		// gethostbyname() devuelve el nombre intacto cuando no resuelve
+		$ip = gethostbyname($host);
+
+		if (is_ipaddr($ip)) {
+			$host = $ip;
+		}
+	}
+
+	return awg_client_format_endpoint($host, $store['port'] ?? '');
 }
 
 /*

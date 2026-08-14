@@ -469,6 +469,19 @@ $peer_cli[$awgg['client_store']]['endpoint'] = 'fd00::1';
 check('y una IPv6 sigue yendo entre corchetes',
 	awg_client_dialin_endpoint($peer_cli) === '[fd00::1]:51822');
 
+/*
+ * La resolucion a IP es de la pagina de estado. Con una IP ya puesta no hay
+ * nada que resolver -- y un hostname no se prueba aca porque seria una
+ * consulta DNS real desde el harness.
+ */
+$peer_cli[$awgg['client_store']]['endpoint'] = '203.0.113.7';
+
+check('resolver una IP la deja como esta',
+	awg_client_dialin_endpoint($peer_cli, true) === '203.0.113.7:51822');
+
+check('y sin pedir resolucion tampoco se toca',
+	awg_client_dialin_endpoint($peer_cli) === '203.0.113.7:51822');
+
 check('un peer sin cliente no tiene direccion de discado',
 	awg_client_dialin_endpoint(array('descr' => 'site-to-site')) === null);
 
