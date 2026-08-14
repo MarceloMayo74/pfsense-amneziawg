@@ -9,6 +9,9 @@ dist/
 # Binaries pulled from the FreeBSD package repo at build time, per ABI.
 bin/
 
+# Local toolchains (portable Go) and build scratch, fetched on demand
+.tools/
+
 # Editors and OS noise
 .vscode/
 .idea/
