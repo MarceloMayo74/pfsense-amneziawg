@@ -229,6 +229,85 @@ foreach (array_diff_key($tun_list, array('unassigned' => '')) as $tun_name => $t
 		count($d['obfuscation']) > 0, 'el tunel no tiene ningun campo cargado');
 }
 
+/*
+ * Deteccion de endpoint y presets, contra la configuracion real. Casi todo esto
+ * depende de lo que este firewall tenga configurado, asi que en vez de esperar
+ * valores fijos se comprueba la FORMA: que lo que se ofrece en un desplegable
+ * sea elegible, y que lo que se adivina sea algo a lo que un cliente pueda
+ * discar.
+ */
+printf("\n=== endpoint y presets ===\n\n");
+
+$candidatos = awg_client_endpoint_candidates();
+$adivinado = awg_client_guess_endpoint();
+
+printf("  candidatos detectados: %d\n", count($candidatos));
+
+foreach ($candidatos as $valor => $etiqueta) {
+	printf("    %s\n", $etiqueta);
+}
+
+printf("  adivinado: %s\n", var_export($adivinado, true));
+
+check('los candidatos son un array', is_array($candidatos));
+
+check('cada candidato es un host o una direccion valida',
+	count(array_filter(array_keys($candidatos),
+		fn($c) => is_ipaddr($c) || is_hostname($c))) === count($candidatos),
+	implode(', ', array_keys($candidatos)));
+
+check('lo adivinado es discable',
+	is_null($adivinado) || is_ipaddr($adivinado) || is_hostname($adivinado),
+	var_export($adivinado, true));
+
+check('y si hay candidatos, adivina alguno',
+	empty($candidatos) || !is_null($adivinado));
+
+// Se cachea por request: la segunda respuesta tiene que ser la misma.
+check('adivinar dos veces da lo mismo', awg_client_guess_endpoint() === $adivinado);
+
+$dns = awg_client_dns_presets();
+
+printf("  presets de DNS: %d\n", count($dns));
+
+check('siempre hay presets de DNS', count($dns) > 0);
+check('incluido el centinela de "ninguno"', array_key_exists(AWG_DNS_NONE, $dns));
+
+$sin_centinela = array_diff_key($dns, array(AWG_DNS_NONE => ''));
+
+$dns_validos = true;
+
+foreach (array_keys($sin_centinela) as $servidores) {
+	foreach (explode(',', $servidores) as $servidor) {
+		if (!is_ipaddr(trim($servidor))) {
+			$dns_validos = false;
+		}
+	}
+}
+
+check('y todos los demas son direcciones de verdad', $dns_validos,
+	implode(' | ', array_keys($sin_centinela)));
+
+$alias = awg_client_alias_presets();
+
+printf("  alias ofrecidos: %d\n", count($alias));
+
+$alias_validos = true;
+
+foreach ($alias as $nombre => $info) {
+	$e = array();
+
+	awg_client_parse_addresses($info['networks'], $e);
+
+	if (!empty($e) || empty($info['networks'])) {
+		$alias_validos = false;
+	}
+
+	printf("    %s -> %s\n", $nombre, $info['networks']);
+}
+
+check('lo que sale de un alias son redes, no nombres', $alias_validos);
+
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 
 exit($fail > 0 ? 1 : 0);

@@ -130,13 +130,21 @@ que escribe el `.conf` del servidor: los dos extremos tienen que ofuscar
 idéntico o no hay handshake, y dos copias del mismo bucle se desincronizan sin
 que falle nada hasta que un cliente no conecta.
 
-Verificado en los dos lados: 61 tests de lógica en `tools/test-client-conf.php`,
-y 22 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
-`awg(8)` parsee el archivo generado —con control negativo— y que todo lo que se
-calcula del túnel aguante una instalación sin ningún túnel configurado.
+El endpoint no hay que escribirlo: el desplegable ofrece lo que el firewall ya
+sabe de sí mismo —los hostnames de DNS dinámico primero, porque sobreviven a un
+cambio de dirección de la WAN, con la IP que tienen registrada; después las
+direcciones de cada interfaz, avisando cuáles son privadas y necesitan un port
+forward; y el FQDN del sistema—. Los DNS y los alias del firewall también se
+ofrecen como presets; de un alias se copia su **contenido**, porque AmneziaWG no
+resuelve nombres y lo que viaja al cliente tienen que ser las direcciones.
 
-Falta la detección de endpoint por dyndns e interfaces, los presets de DNS y de
-alias, y después el QR, el zip y el envío por mail.
+Verificado en los dos lados: 75 tests de lógica en `tools/test-client-conf.php`,
+y 31 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
+`awg(8)` parsee el archivo generado —con control negativo—, que todo lo que se
+calcula del túnel aguante una instalación sin ningún túnel, y que lo detectado
+sea realmente discable.
+
+Falta el QR, el zip y el envío por mail.
 
 ## Por dónde empezar
 

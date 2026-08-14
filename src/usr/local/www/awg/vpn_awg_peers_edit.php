@@ -305,7 +305,8 @@ $group->add(new Form_Select(
 	'endpoint_detected',
 	'Detected',
 	'',
-	array('' => gettext('Detected on this firewall...'))
+	array_merge(array('' => gettext('Detected on this firewall...')),
+	            awg_client_endpoint_candidates())
 ))->setHelp('Dynamic DNS hostnames and interface addresses already configured here. ' .
 	    'Picking one fills the endpoint. (<a href="/services_dyndns.php">' . gettext('Dynamic DNS') . '</a>)')
   ->setWidth(4);
@@ -460,16 +461,54 @@ $section->addInput(new Form_Select(
 		'custom'	=> gettext('Custom'))
 ))->setHelp('Preset for the networks below.');
 
-$section->addInput(new Form_Input(
+/*
+ * Los alias se ofrecen al lado del campo pero no se mandan nunca: AmneziaWG no
+ * sabe lo que es un alias, asi que elegir uno vuelca su contenido en el campo y
+ * lo que se guarda son las direcciones.
+ */
+$alias_presets = awg_client_alias_presets();
+
+$alias_options = $alias_networks = array();
+
+foreach ($alias_presets as $alias_name => $alias_info) {
+	$alias_options[$alias_name] = $alias_info['label'];
+	$alias_networks[$alias_name] = $alias_info['networks'];
+}
+
+// Solo en un grupo hace falta que el grupo lleve la etiqueta
+$networks_input = new Form_Input(
 	'client_allowedips',
-	'*Tunneled Networks',
+	empty($alias_options) ? '*Tunneled Networks' : 'Tunneled Networks',
 	'text',
 	$pconfig['client_allowedips'],
 	['placeholder' => '0.0.0.0/0, ::/0', 'autocomplete' => 'off']
-))->addClass('trim')
-  ->setHelp('Networks the client routes into the tunnel. Written as <code>AllowedIPs</code> in the client file.');
+);
 
-$section->addInput(new Form_Input(
+$networks_input->addClass('trim')
+	->setHelp('Networks the client routes into the tunnel. Written as <code>AllowedIPs</code> in the client file.');
+
+if (empty($alias_options)) {
+	$section->addInput($networks_input);
+} else {
+	$group = new Form_Group('*Tunneled Networks');
+
+	$group->add($networks_input)->setWidth(6);
+
+	$group->add(new Form_Select(
+		'allowedips_alias',
+		'Aliases',
+		'',
+		array_merge(array('' => gettext('Aliases...')), $alias_options)
+	))->setHelp('Firewall aliases holding networks. Picking one adds its addresses to the field on the left. ' .
+		    '(<a href="/firewall_aliases.php">' . gettext('Aliases') . '</a>)')
+	  ->setWidth(4);
+
+	$section->add($group);
+}
+
+$group = new Form_Group('DNS Servers');
+
+$group->add(new Form_Input(
 	'dns',
 	'DNS Servers',
 	'text',
@@ -477,7 +516,19 @@ $section->addInput(new Form_Input(
 	['placeholder' => 'DNS Servers']
 ))->addClass('trim')
   ->setHelp('Optional. Separate multiple entries with commas.<br />
-	     Leave blank to keep the DNS servers already configured on the client.');
+	     Leave blank to keep the DNS servers already configured on the client.')
+  ->setWidth(4);
+
+$group->add(new Form_Select(
+	'dns_preset',
+	'DNS Preset',
+	'',
+	array_merge(array('' => gettext('Presets...')), awg_client_dns_presets())
+))->setHelp('Picking one fills the field on the left. Full tunnel sets the tunnel address of this firewall ' .
+	    'automatically; for internal name resolution on a split tunnel, type that address here by hand.')
+  ->setWidth(6);
+
+$section->add($group);
 
 $section->addInput(new Form_Input(
 	'mtu',
@@ -614,6 +665,51 @@ events.push(function() {
 		if ($(this).val().length > 0) {
 			$('#endpoint').val($(this).val());
 		}
+	});
+
+	// Idem el preset de DNS, salvo el centinela de "ninguno", que si viaja
+	$('#dns_preset').change(function() {
+		if ($(this).val().length > 0) {
+			$('#dns').val($(this).val() == '<?=AWG_DNS_NONE?>' ? '' : $(this).val());
+		}
+	});
+
+	/*
+	 * Un alias AGREGA sus redes a lo que ya haya, sin repetir: la lista se arma
+	 * juntando varios, y pisarla obligaria a elegir uno solo.
+	 */
+	var awgAliases = <?=json_encode($alias_networks)?>;
+
+	function splitList(value) {
+		return String(value).split(',').map(function(s) {
+			return s.trim();
+		}).filter(function(s) {
+			return s.length > 0;
+		});
+	}
+
+	$('#allowedips_alias').change(function() {
+		var networks = awgAliases[$(this).val()];
+
+		if (!networks) {
+			return;
+		}
+
+		var current = splitList($('#client_allowedips').val());
+
+		splitList(networks).forEach(function(network) {
+			if (current.indexOf(network) === -1) {
+				current.push(network);
+			}
+		});
+
+		$('#client_allowedips').val(current.join(', '));
+
+		// Ya no es ninguno de los dos presets
+		$('#routing').val('custom');
+
+		// Volver el desplegable a su leyenda, para poder elegir otro
+		$(this).val('');
 	});
 
 	/*

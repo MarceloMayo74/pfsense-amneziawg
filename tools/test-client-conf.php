@@ -43,9 +43,24 @@ if (!function_exists('is_numericint')) {
 		         (is_string($arg) && strlen($arg) > 0 && ctype_digit($arg))) ? true : false);
 	}
 }
+$test_config = array();
+
 if (!function_exists('config_get_path')) {
 	function config_get_path($path, $default = null) {
+		global $test_config;
+
+		if (array_key_exists($path, $test_config)) {
+			return $test_config[$path];
+		}
+
 		return ($path === 'system/hostname') ? 'pfSense.home.arpa' : $default;
+	}
+}
+if (!function_exists('is_hostname')) {
+	function is_hostname($v) {
+		$v = (string) $v;
+
+		return (strlen($v) > 0) && (preg_match('/^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$/i', $v) === 1);
 	}
 }
 
@@ -108,6 +123,9 @@ eval(extract_function("{$src}/awg_client.inc", 'awg_client_parse_addresses'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_post'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_line'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_format_endpoint'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_normalize_dyndns_host'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_hostnames_from_updateurl'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_config_entries'));
 
 $pass = $fail = 0;
 
@@ -417,6 +435,66 @@ check('y no se le agregan corchetes dos veces',
 check('sin host no hay endpoint', awg_client_format_endpoint('', '51820') === '');
 check('sin puerto queda el host solo',
 	awg_client_format_endpoint('vpn.example.com', '') === 'vpn.example.com');
+
+printf("\n-- DNS dinamico --\n\n");
+
+check("'@' quiere decir el dominio pelado",
+	awg_client_normalize_dyndns_host('@') === '');
+check("'*' tambien",
+	awg_client_normalize_dyndns_host('*') === '');
+check("'*.example.com' cubre cualquier nombre abajo",
+	awg_client_normalize_dyndns_host('*.example.com') === 'example.com',
+	awg_client_normalize_dyndns_host('*.example.com'));
+check('el punto final es notacion DNS y se saca',
+	awg_client_normalize_dyndns_host('vpn.example.com.') === 'vpn.example.com',
+	awg_client_normalize_dyndns_host('vpn.example.com.'));
+check('un hostname normal queda como esta',
+	awg_client_normalize_dyndns_host(' vpn.example.com ') === 'vpn.example.com');
+
+check('saca el hostname de una URL de actualizacion',
+	awg_client_hostnames_from_updateurl('https://svc.example/update?hostname=vpn.example.com&token=SECRETO')
+		=== array('vpn.example.com'));
+
+check('acepta varios nombres separados por coma',
+	awg_client_hostnames_from_updateurl('https://svc.example/u?domains=a.example.com,b.example.com')
+		=== array('a.example.com', 'b.example.com'));
+
+check('a DuckDNS le completa el dominio que omite',
+	awg_client_hostnames_from_updateurl('https://www.duckdns.org/update?domains=casa&token=SECRETO')
+		=== array('casa.duckdns.org'),
+	implode(',', awg_client_hostnames_from_updateurl('https://www.duckdns.org/update?domains=casa&token=SECRETO')));
+
+check('una etiqueta sola sin DuckDNS no alcanza',
+	awg_client_hostnames_from_updateurl('https://svc.example/u?hostname=casa') === array());
+
+check('una URL sin query no da nada',
+	awg_client_hostnames_from_updateurl('https://svc.example/update') === array());
+
+check('y una vacia tampoco',
+	awg_client_hostnames_from_updateurl('') === array());
+
+/*
+ * La forma torcida que aparece en configuraciones actualizadas a mano: una
+ * entrada asociativa suelta donde deberia haber una lista.
+ */
+$test_config['dyndnses/dyndns'] = array('type' => 'cloudflare', 'host' => 'vpn');
+
+check('una entrada suelta se normaliza a lista de una',
+	count(awg_client_config_entries('dyndnses/dyndns', 'type')) === 1);
+
+$test_config['dyndnses/dyndns'] = array(
+	array('type' => 'cloudflare', 'host' => 'a'),
+	array('type' => 'noip', 'host' => 'b'));
+
+check('y una lista de dos queda en dos',
+	count(awg_client_config_entries('dyndnses/dyndns', 'type')) === 2);
+
+$test_config['dyndnses/dyndns'] = array();
+
+check('sin entradas devuelve una lista vacia',
+	awg_client_config_entries('dyndnses/dyndns', 'type') === array());
+
+unset($test_config['dyndnses/dyndns']);
 
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 

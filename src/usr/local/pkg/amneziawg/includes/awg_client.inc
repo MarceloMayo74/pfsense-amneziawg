@@ -24,6 +24,15 @@ require_once('config.inc');
 require_once('util.inc');
 
 /*
+ * Centinela del desplegable de DNS. Es un valor imposible como servidor, y se
+ * traduce a vacio al guardar: sirve para distinguir "el usuario eligio no poner
+ * ninguno" de "el usuario no toco el campo".
+ */
+if (!defined('AWG_DNS_NONE')) {
+	define('AWG_DNS_NONE', '__none__');
+}
+
+/*
  * Arma el .conf del cliente y lo devuelve como texto.
  *
  * $conf espera:
@@ -510,6 +519,441 @@ function awg_client_format_endpoint($host, $port) {
 }
 
 /*
+ * El FQDN del sistema, o null si no hay dominio configurado.
+ */
+function awg_client_system_fqdn() {
+	$hostname = trim((string) config_get_path('system/hostname'));
+	$domain = trim((string) config_get_path('system/domain'));
+
+	return (!empty($hostname) && !empty($domain)) ? "{$hostname}.{$domain}" : null;
+}
+
+/*
+ * pfSense normalmente parsea estas etiquetas a una lista aunque haya una sola
+ * entrada, pero configuraciones actualizadas o editadas a mano aparecen con una
+ * entrada asociativa suelta. Normaliza las dos formas a una lista de arrays.
+ */
+function awg_client_config_entries($path, $probe_key) {
+	$entries = config_get_path($path, []);
+
+	if (!is_array($entries)) {
+		return array();
+	}
+
+	if (isset($entries[$probe_key])) {
+		$entries = array($entries);
+	}
+
+	return array_values(array_filter($entries, 'is_array'));
+}
+
+/*
+ * La direccion que registro por ultima vez una entrada de DNS dinamico.
+ *
+ * pfSense arma el nombre de ese archivo pasando el hostname por
+ * escapeshellarg(), que deja las comillas adentro del nombre, asi que se busca
+ * con un glob en vez de rearmar el nombre aca.
+ */
+function awg_client_dyndns_cached_ip($dyndns) {
+	global $g;
+
+	$conf_path = isset($g['conf_path']) ? $g['conf_path'] : '/conf';
+
+	$pattern = "{$conf_path}/dyndns_{$dyndns['interface']}{$dyndns['type']}*{$dyndns['id']}.cache";
+
+	foreach ((array) glob($pattern) as $file) {
+		$cached = explode('|', (string) @file_get_contents($file));
+
+		if (is_ipaddr(trim($cached[0]))) {
+			return trim($cached[0]);
+		}
+	}
+
+	return null;
+}
+
+/*
+ * Convierte lo que haya en el campo host de un DNS dinamico en un hostname
+ * usable: '@' es el dominio pelado, '*.example.com' cubre cualquier nombre
+ * abajo, y el punto final es notacion DNS.
+ */
+function awg_client_normalize_dyndns_host($hostname) {
+	$hostname = rtrim(trim((string) $hostname), '.');
+
+	if (($hostname === '@') || ($hostname === '*')) {
+		return '';
+	}
+
+	if (substr($hostname, 0, 2) === '*.') {
+		$hostname = substr($hostname, 2);
+	}
+
+	return $hostname;
+}
+
+/*
+ * Saca como se pueda el hostname que actualiza una entrada de tipo "Custom".
+ *
+ * Esas entradas guardan el nombre adentro de la URL de actualizacion, al lado
+ * del token de la cuenta, asi que se leen solo los parametros de nombre
+ * conocidos y la URL no se muestra nunca en ningun lado.
+ */
+function awg_client_hostnames_from_updateurl($updateurl) {
+	$a_ret = array();
+
+	$updateurl = trim((string) $updateurl);
+
+	if (strlen($updateurl) == 0) {
+		return $a_ret;
+	}
+
+	$query = parse_url($updateurl, PHP_URL_QUERY);
+	$urlhost = strtolower((string) parse_url($updateurl, PHP_URL_HOST));
+
+	if (empty($query)) {
+		return $a_ret;
+	}
+
+	parse_str($query, $params);
+
+	foreach (array('hostname', 'host', 'domains', 'domain', 'name') as $key) {
+		if (empty($params[$key]) || !is_string($params[$key])) {
+			continue;
+		}
+
+		// Los servicios estilo DuckDNS aceptan varios nombres separados por coma
+		foreach (explode(',', $params[$key]) as $candidate) {
+			$candidate = awg_client_normalize_dyndns_host($candidate);
+
+			// DuckDNS ademas acepta la etiqueta pelada, sin su dominio
+			if ((strpos($candidate, '.') === false)
+			    && (strpos($urlhost, 'duckdns.org') !== false)) {
+				$candidate .= '.duckdns.org';
+			}
+
+			if ((strpos($candidate, '.') !== false) && is_hostname($candidate)) {
+				$a_ret[] = $candidate;
+			}
+		}
+
+		if (!empty($a_ret)) {
+			break;
+		}
+	}
+
+	return array_values(array_unique($a_ret));
+}
+
+/*
+ * Los hostnames de DNS dinamico ya configurados en este firewall.
+ *
+ * Las dos listas son configuracion del pfSense, no de paquetes: los clientes
+ * DynDNS viven en dyndnses/dyndns y los de RFC 2136 en dnsupdates/dnsupdate.
+ * Una entrada esta habilitada cuando la clave 'enable' esta presente.
+ */
+function awg_client_dyndns_hostnames() {
+	global $dyndns_split_domain_types;
+
+	$a_ret = array();
+
+	foreach (awg_client_config_entries('dyndnses/dyndns', 'type') as $dyndns) {
+		if (!isset($dyndns['enable'])) {
+			continue;
+		}
+
+		$hostname = awg_client_normalize_dyndns_host($dyndns['host'] ?? '');
+		$domainname = awg_client_normalize_dyndns_host($dyndns['domainname'] ?? '');
+
+		/*
+		 * Solo algunos proveedores parten el registro en host y dominio, y
+		 * pfSense guarda esa lista en un global. Si por lo que sea no esta, se
+		 * cae a mirar el sufijo.
+		 */
+		$is_split = is_array($dyndns_split_domain_types)
+				? in_array($dyndns['type'], $dyndns_split_domain_types)
+				: !empty($domainname);
+
+		if ($is_split
+		    && !empty($domainname)
+		    && (substr($hostname, -strlen($domainname)) !== $domainname)) {
+			$hostname = empty($hostname) ? $domainname : "{$hostname}.{$domainname}";
+		}
+
+		$hostnames = (empty($hostname) || !is_hostname($hostname))
+				? awg_client_hostnames_from_updateurl($dyndns['updateurl'] ?? '')
+				: array($hostname);
+
+		foreach ($hostnames as $hostname) {
+			$a_ret[] = array(
+				'hostname'	=> $hostname,
+				'source'	=> 'dyndns',
+				'type'		=> (string) ($dyndns['type'] ?? ''),
+				'interface'	=> (string) ($dyndns['interface'] ?? ''),
+				'descr'		=> (string) ($dyndns['descr'] ?? ''),
+				'cached_ip'	=> awg_client_dyndns_cached_ip($dyndns));
+		}
+	}
+
+	foreach (awg_client_config_entries('dnsupdates/dnsupdate', 'host') as $dnsupdate) {
+		if (!isset($dnsupdate['enable'])) {
+			continue;
+		}
+
+		$hostname = awg_client_normalize_dyndns_host($dnsupdate['host'] ?? '');
+
+		if (empty($hostname) || !is_hostname($hostname)) {
+			continue;
+		}
+
+		$a_ret[] = array(
+			'hostname'	=> $hostname,
+			'source'	=> 'rfc2136',
+			'type'		=> 'rfc2136',
+			'interface'	=> (string) ($dnsupdate['interface'] ?? ''),
+			'descr'		=> (string) ($dnsupdate['descr'] ?? ''),
+			'cached_ip'	=> null);
+	}
+
+	return $a_ret;
+}
+
+/*
+ * Las direcciones que tienen ahora mismo las interfaces configuradas.
+ */
+function awg_client_interface_addresses() {
+	$a_ret = array();
+
+	foreach (get_configured_interface_with_descr() as $if => $descr) {
+		foreach (array(get_interface_ip($if), get_interface_ipv6($if)) as $address) {
+			if (!is_ipaddr($address)) {
+				continue;
+			}
+
+			$a_ret[] = array(
+				'address'	=> $address,
+				'if'		=> $if,
+				'descr'		=> $descr,
+				'private'	=> (is_ipaddrv4($address)
+							&& function_exists('is_private_ip')
+							&& is_private_ip($address)));
+		}
+	}
+
+	return $a_ret;
+}
+
+/*
+ * Todo lo que este firewall ya sabe que un cliente podria discar, listo para un
+ * desplegable. Los nombres de DNS dinamico van primero porque sobreviven a un
+ * cambio de direccion de la WAN.
+ */
+function awg_client_endpoint_candidates() {
+	$a_ret = array();
+
+	/*
+	 * El mismo hostname suele estar registrado dos veces, una para A y otra
+	 * para AAAA (cloudflare + cloudflare-v6). Eso es UN endpoint, asi que se
+	 * fusionan las entradas en vez de dejar que gane la ultima: cualquiera de
+	 * las dos puede ser la que tiene la direccion registrada.
+	 */
+	$hostnames = array();
+
+	foreach (awg_client_dyndns_hostnames() as $entry) {
+		$key = $entry['hostname'];
+
+		if (!isset($hostnames[$key])) {
+			$hostnames[$key] = array('types' => array(), 'rfc2136' => false,
+			                         'descr' => null, 'cached_ip' => null);
+		}
+
+		if ($entry['source'] == 'rfc2136') {
+			$hostnames[$key]['rfc2136'] = true;
+		} else {
+			$hostnames[$key]['types'][] = $entry['type'];
+		}
+
+		if (empty($hostnames[$key]['descr']) && !empty($entry['descr'])) {
+			$hostnames[$key]['descr'] = $entry['descr'];
+		}
+
+		if (empty($hostnames[$key]['cached_ip']) && !empty($entry['cached_ip'])) {
+			$hostnames[$key]['cached_ip'] = $entry['cached_ip'];
+		}
+	}
+
+	foreach ($hostnames as $hostname => $info) {
+		$notes = array();
+
+		if (!empty($info['types'])) {
+			$notes[] = sprintf(gettext('Dynamic DNS, %s'),
+			                   implode(' + ', array_unique($info['types'])));
+		}
+
+		if ($info['rfc2136']) {
+			$notes[] = gettext('RFC 2136');
+		}
+
+		if (!empty($info['descr'])) {
+			$notes[] = $info['descr'];
+		}
+
+		if (!empty($info['cached_ip'])) {
+			$notes[] = sprintf(gettext('currently %s'), $info['cached_ip']);
+		}
+
+		$a_ret[$hostname] = "{$hostname} (" . implode(', ', $notes) . ')';
+	}
+
+	foreach (awg_client_interface_addresses() as $entry) {
+		if (array_key_exists($entry['address'], $a_ret)) {
+			continue;
+		}
+
+		$notes = array($entry['descr']);
+
+		if ($entry['private']) {
+			$notes[] = gettext('private address, needs a port forward upstream');
+		}
+
+		$a_ret[$entry['address']] = "{$entry['address']} (" . implode(', ', $notes) . ')';
+	}
+
+	$fqdn = awg_client_system_fqdn();
+
+	if (!empty($fqdn) && !array_key_exists($fqdn, $a_ret)) {
+		$a_ret[$fqdn] = "{$fqdn} (" . gettext('system hostname') . ')';
+	}
+
+	return $a_ret;
+}
+
+/*
+ * El mejor endpoint que se puede adivinar para que los clientes disquen.
+ *
+ * Se contesta una sola vez por request: llegar a esta conclusion recorre todos
+ * los clientes de DNS dinamico y todas las interfaces, y el formulario lo
+ * pregunta una vez por tunel.
+ */
+function awg_client_guess_endpoint() {
+	// null es una respuesta legitima, asi que el cache arranca en otra cosa
+	static $guess = false;
+
+	if ($guess !== false) {
+		return $guess;
+	}
+
+	$candidates = awg_client_endpoint_candidates();
+
+	// Un hostname de DNS dinamico, si lo hay, es siempre la mejor respuesta
+	foreach (awg_client_dyndns_hostnames() as $entry) {
+		return ($guess = $entry['hostname']);
+	}
+
+	// Si no, la primera direccion de interfaz que sea ruteable
+	foreach (awg_client_interface_addresses() as $entry) {
+		if (!$entry['private']) {
+			return ($guess = $entry['address']);
+		}
+	}
+
+	$fqdn = awg_client_system_fqdn();
+
+	if (!empty($fqdn)) {
+		return ($guess = $fqdn);
+	}
+
+	return ($guess = (empty($candidates) ? null : array_key_first($candidates)));
+}
+
+/*
+ * Los DNS que se le ofrecen al cliente, listos para un desplegable.
+ */
+function awg_client_dns_presets() {
+	$a_ret = array();
+
+	$system_dns = array_filter((array) config_get_path('system/dnsserver', []), 'is_ipaddr');
+
+	if (!empty($system_dns)) {
+		$a_ret[implode(', ', $system_dns)] = sprintf(
+			gettext('The DNS servers of this firewall (%s)'), implode(', ', $system_dns));
+	}
+
+	$public = array(
+		'8.8.8.8, 8.8.4.4'		=> gettext('Google Public DNS'),
+		'1.1.1.1, 1.0.0.1'		=> gettext('Cloudflare DNS'),
+		'9.9.9.9, 149.112.112.112'	=> gettext('Quad9'));
+
+	foreach ($public as $servers => $label) {
+		if (!array_key_exists($servers, $a_ret)) {
+			$a_ret[$servers] = "{$label} ({$servers})";
+		}
+	}
+
+	$a_ret[AWG_DNS_NONE] = gettext('None, keep whatever DNS the client already uses');
+
+	return $a_ret;
+}
+
+/*
+ * Los alias del firewall que se le pueden pasar a un cliente como lista de
+ * redes.
+ *
+ * Devuelve nombre => array('label' => ..., 'networks' => ...), donde las redes
+ * son el CONTENIDO del alias y no su nombre: AmneziaWG no resuelve nada, asi
+ * que lo que termina en el archivo del cliente tienen que ser las direcciones,
+ * tal como estan en el momento de crearlo. Lo que no sea una direccion -- un
+ * hostname, un alias anidado -- se descarta, y un alias que queda sin nada
+ * usable no se ofrece.
+ */
+function awg_client_alias_presets() {
+	$a_ret = array();
+
+	foreach (config_get_path('aliases/alias', []) as $alias) {
+		// Puertos y tablas por URL no son redes a las que un cliente rutee
+		if (!in_array($alias['type'] ?? '', array('host', 'network'))) {
+			continue;
+		}
+
+		$name = trim((string) ($alias['name'] ?? ''));
+
+		if ((strlen($name) == 0) || array_key_exists($name, $a_ret)) {
+			continue;
+		}
+
+		// El contenido de un alias va separado por espacios, uno por direccion
+		$entries = preg_split('/[\s,]+/', trim((string) ($alias['address'] ?? '')),
+		                      -1, PREG_SPLIT_NO_EMPTY);
+
+		$discard = array();
+
+		$addresses = awg_client_parse_addresses(implode(',', (array) $entries), $discard);
+
+		if (empty($addresses)) {
+			continue;
+		}
+
+		$networks = awg_client_addresses_to_line($addresses);
+
+		$notes = array();
+
+		if (!empty($alias['descr'])) {
+			$notes[] = trim((string) $alias['descr']);
+		}
+
+		// Una sola red es lo bastante corta para leerla en la lista misma
+		$notes[] = (count($addresses) == 1)
+				? $networks
+				: sprintf(gettext('%d networks'), count($addresses));
+
+		$a_ret[$name] = array(
+			'label'		=> "{$name} (" . implode(', ', $notes) . ')',
+			'networks'	=> $networks);
+	}
+
+	return $a_ret;
+}
+
+/*
  * Parsea una lista de direcciones separadas por coma a filas
  * array('address' => ..., 'mask' => ...).
  *
@@ -636,7 +1080,7 @@ function awg_client_tunnel_defaults($tunnel_name) {
 		'mtu'			=> $remembered('mtu') ?? awg_client_tunnel_mtu($tunnel_name),
 		'routing'		=> $routing,
 		'client_allowedips'	=> $client_allowedips,
-		'endpoint'		=> $remembered('endpoint'),
+		'endpoint'		=> $remembered('endpoint') ?? awg_client_guess_endpoint(),
 		'port'			=> $remembered('port') ?? awg_client_tunnel_port($tunnel_name),
 		'address'		=> awg_client_next_address($tunnel_name),
 		'persistentkeepalive'	=> array_key_exists('persistentkeepalive', $store)
@@ -721,6 +1165,11 @@ function awg_client_do_peer_post($post) {
 	$pconfig['persistentkeepalive']	= trim((string) ($post['persistentkeepalive'] ?? ''));
 
 	$genera = ($pconfig['client_enable'] == 'yes');
+
+	// El centinela del desplegable es un artefacto del formulario, no un DNS.
+	if ($pconfig['dns'] === AWG_DNS_NONE) {
+		$pconfig['dns'] = '';
+	}
 
 	if (!array_key_exists($pconfig['tun'], awg_get_tun_list())) {
 		$input_errors[] = gettext('Select a valid AmneziaWG tunnel. The tunnel must exist and have a valid key pair.');
