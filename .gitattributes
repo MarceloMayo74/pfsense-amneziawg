@@ -6,3 +6,13 @@
 # Binarios que se traen del repo de paquetes de FreeBSD al empaquetar.
 *.pkg binary
 bin/* binary
+
+# Las capturas de pantalla del README. La regla de arriba usa text=auto, que
+# detecta binarios solo por su contenido: decirlo explicito sale gratis y una
+# imagen a la que le tocaron los saltos de linea no se rompe de a poco, se
+# rompe entera.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
