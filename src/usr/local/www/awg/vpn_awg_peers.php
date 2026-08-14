@@ -35,11 +35,15 @@ require_once('guiconfig.inc');
 require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 require_once('amneziawg/includes/awg_client.inc');
+require_once('amneziawg/includes/awg_mail.inc');
 
 global $awgg;
 
 // Initialize $awgg state
 awg_globals();
+
+$input_errors = array();
+$savemsg = null;
 
 if ($_POST) {
 	if (isset($_POST['apply'])) {
@@ -60,6 +64,14 @@ if ($_POST) {
 
 	if (isset($_POST['peer'])) {
 		$peer_idx = $_POST['peer'];
+
+		/*
+		 * Solo las acciones que cambian un peer contestan con la terna de
+		 * awg_*_peer(); las que solo sacan el archivo para afuera no. Por eso
+		 * arranca en null y se mira antes de leerla: sin eso, un download que
+		 * falla se lleva puesto su propio mensaje de error.
+		 */
+		$res = null;
 
 		switch ($_POST['act']) {
 			case 'download':
@@ -99,6 +111,29 @@ if ($_POST) {
 							awg_peer_get_config($peer_idx, false)[1]['descr']))));
 				exit;
 
+			case 'email':
+				$client_conf = awg_client_conf_from_peer($peer_idx, $error);
+
+				if ($client_conf === false) {
+					$input_errors[] = $error;
+					break;
+				}
+
+				[$ml_idx, $ml_peer, $ml_is_new] = awg_peer_get_config($peer_idx, false);
+
+				$sent = awg_mail_send_client_conf($_POST['email'] ?? '',
+					$client_conf,
+					awg_client_conf_filename($ml_peer['descr']),
+					$ml_peer['descr']);
+
+				if ($sent['success']) {
+					$savemsg = $sent['message'];
+				} else {
+					$input_errors[] = $sent['message'];
+				}
+
+				break;
+
 			case 'toggle':
 				$res = awg_toggle_peer($peer_idx);
 				break;
@@ -113,10 +148,10 @@ if ($_POST) {
 				break;
 		}
 
-		$input_errors = $res['input_errors'];
+		if (is_array($res)) {
+			$input_errors = $res['input_errors'];
 
-		if (empty($input_errors)) {
-			if (awg_is_service_running() && $res['changes']) {
+			if (empty($input_errors) && awg_is_service_running() && $res['changes']) {
 				mark_subsystem_dirty($awgg['subsystems']['awg']);
 
 				// Add tunnel to the list to apply
@@ -152,6 +187,12 @@ awg_print_config_apply_box();
 if (!empty($input_errors)) {
 
 	print_input_errors($input_errors);
+
+}
+
+if (!empty($savemsg)) {
+
+	print_info_box($savemsg, 'success');
 
 }
 
@@ -194,6 +235,7 @@ if (count(config_get_path('installedpackages/amneziawg/peers/item', [])) > 0):
 <?php		if (awg_client_is_exportable($peer)): ?>
 							<a class="fa-solid fa-download" title="<?=gettext('Download the client configuration')?>" href="<?="?act=download&peer={$peer_idx}"?>" usepost></a>
 							<a class="fa-solid fa-qrcode awg-qr" title="<?=gettext('Download the QR code')?>" href="#" data-peer="<?=htmlspecialchars($peer_idx)?>"></a>
+							<a class="fa-solid fa-paper-plane awg-mail" title="<?=gettext('Send the client configuration by email')?>" href="#" data-peer="<?=htmlspecialchars($peer_idx)?>" data-descr="<?=htmlspecialchars($peer['descr'])?>"></a>
 <?php		endif; ?>
 							<a class="fa-solid fa-trash-can text-danger" title="<?=gettext('Delete Peer')?>" href="<?="?act=delete&peer={$peer_idx}"?>" usepost></a>
 						</td>
@@ -223,6 +265,43 @@ endif;
 		</a>
 	</nav>
 </form>
+
+<!--
+	La direccion se pide en un modal y no en la fila: escribir un mail adentro
+	de una tabla de acciones no entra, y el aviso de que el correo no viaja
+	cifrado tiene que estar a la vista en el momento de mandarlo.
+
+	Formulario propio, fuera del mainform: el submit de arriba es el de Apply.
+-->
+<div class="modal fade" id="awg_email_modal" tabindex="-1" role="dialog" aria-labelledby="awg_email_title">
+	<div class="modal-dialog" role="document">
+		<form method="post" class="modal-content">
+			<div class="modal-header">
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+				<h4 class="modal-title" id="awg_email_title"><?=gettext('Send the client configuration')?></h4>
+			</div>
+			<div class="modal-body">
+				<input type="hidden" name="act" value="email" />
+				<input type="hidden" name="peer" id="awg_email_peer" value="" />
+				<p id="awg_email_descr"></p>
+				<div class="form-group">
+					<label for="awg_email_to"><?=gettext('Email address')?></label>
+					<input type="email" name="email" id="awg_email_to" class="form-control" placeholder="user@example.com" required="required" />
+				</div>
+				<span class="help-block">
+					<?=gettext('Uses the SMTP server configured under System > Advanced > Notifications. Email is not encrypted in transit end to end; prefer the QR code or the download for sensitive deployments.')?>
+				</span>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-default" data-dismiss="modal"><?=gettext('Cancel')?></button>
+				<button type="submit" class="btn btn-primary">
+					<i class="fa-solid fa-paper-plane icon-embed-btn"></i>
+					<?=gettext('Send')?>
+				</button>
+			</div>
+		</form>
+	</div>
+</div>
 
 <script type="text/javascript">
 //<![CDATA[
@@ -287,6 +366,18 @@ events.push(function() {
 		});
 	});
 <?php endif; ?>
+
+	$('.awg-mail').click(function(event) {
+		event.preventDefault();
+
+		var $this = $(this);
+
+		$('#awg_email_peer').val($this.attr('data-peer'));
+		$('#awg_email_descr').text($this.attr('data-descr'));
+		$('#awg_email_to').val('');
+
+		$('#awg_email_modal').modal('show');
+	});
 
 });
 //]]>

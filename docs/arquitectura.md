@@ -387,9 +387,56 @@ Dos defensas, porque una sola no alcanza:
   argumento no es de estilo: con `$active` en false, un comando vacío no es
   inocuo sino destructivo.
 
-**Fase 6 — Integración con wgeasy.** Generación de configs de cliente con QR,
-zip y mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de
-las referencias tiene y la que hace usable el modo servidor.
+**Fase 6 — Configs de cliente. ✅ Terminada el 14-08-2026.** Generación de
+configs de cliente con QR, zip y mail, incluyendo los parámetros de ofuscación.
+Es la pieza que ninguna de las referencias tiene y la que hace usable el modo
+servidor. Va dentro de la página de peers del propio paquete: wgeasy tiene que
+atornillarse por afuera porque no puede tocar el paquete oficial de WireGuard,
+acá la página de peer es propia.
+
+Verificada con 174 tests locales y 61 sobre el firewall.
+
+### La trampa que dejó esta fase: el mailer que no está
+
+El envío por mail se escribió primero sobre **PHPMailer**, que es lo que usa
+wgeasy y lo único de los dos caminos que sabe adjuntar un archivo. Antes de dar
+la fase por terminada se corrió `spike/verify-mail.php` sobre el firewall, y el
+primer test falló: **PHPMailer no existe en pfSense**. No está la clase, no está
+el archivo, no está en ningún lado del sistema. Lo que pfSense trae es **PEAR
+Mail** (`/usr/local/share/pear`), que es lo que usa su propio
+`send_smtp_message()`.
+
+Lo que hace grave al hallazgo es cómo se manifiesta: no hay error. El código
+tiene un camino de respaldo, así que el mail sale igual — con el archivo pegado
+en el cuerpo del mensaje en vez de adjunto. Todo "funciona", y la única señal de
+que el diseño no se está cumpliendo es que el adjunto nunca aparece.
+
+Por eso el adjunto se arma ahora construyendo el MIME a mano sobre PEAR Mail
+(`awg_mail_multipart()`), y el camino de PHPMailer se borró en vez de dejarlo
+como primera opción: un camino que no puede correr no es un respaldo, es código
+muerto que hace creer que hay dos opciones. El test que quedó en la sonda está
+invertido a propósito —*"PHPMailer sigue sin estar"*— para que se note si alguna
+versión futura lo agrega.
+
+La misma sonda dejó al descubierto tres claves de configuración leídas mal, las
+tres heredadas de wgeasy, y las tres con el mismo patrón: leer la clave que no es
+no da error, da una funcionalidad silenciosamente degradada.
+
+| se leía | lo que hay de verdad | consecuencia |
+|---|---|---|
+| `authentication_mech` | `authentication_mechanism` | se manda sin autenticar |
+| `isset(ssl_validate)` | `sslvalidate` = `enabled`/`disabled` | nunca se valida el certificado |
+| `tls` | no existe; la página solo ofrece SSL | rama muerta |
+
+Y una cuarta, en el camino de respaldo: `send_smtp_message()` devuelve `null`
+cuando salió bien y **la cadena del error** cuando falló. El `!== false` con el
+que se lo evaluaba da verdadero para las dos, así que un envío fallido se
+informaba como éxito.
+
+Los nombres salen de `/usr/local/pfSense/include/www/system_advanced_notifications.inc`,
+que es lo que las escribe. Vale como método general: cuando se lee configuración
+de otro subsistema, la fuente de verdad es el código que la **escribe**, no el
+que la lee.
 
 ---
 
@@ -398,7 +445,17 @@ las referencias tiene y la que hace usable el modo servidor.
 - **Estabilidad de los procesos go a largo plazo.** El watchdog de la fase 5
   existe justamente porque el plugin de OPNsense consideró necesario tenerlo.
 - **Duplicación de mantenimiento con wgeasy.** Dos árboles de código con mucha
-  lógica común. Evaluar en la fase 6 si conviene extraer lo compartido.
+  lógica común. La fase 6 dio la primera evidencia concreta de lo que cuesta: el
+  envío por mail se portó de wgeasy y traía cuatro bugs —tres claves de
+  configuración leídas mal y un valor de retorno interpretado al revés—, más un
+  mailer que no existe en pfSense. Los bugs siguen **vivos en wgeasy**, que es un
+  paquete publicado: ahí el mail funciona contra un servidor sin autenticación y
+  falla en silencio contra uno con ella.
+
+  Extraer lo compartido no arreglaría esto por sí solo —el código común habría
+  llevado los mismos bugs a los dos lados—, y lo que sí los encontró fue correr
+  una sonda contra el sistema real. Pero deja claro que un arreglo acá no llega
+  solo al otro repo, y que hay que ir a aplicarlo a mano.
 
 ### Resuelto: el throughput
 

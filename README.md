@@ -8,9 +8,10 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Estado: fase 5 terminada.** El paquete instala, tiene los 16 campos de
+> **Estado: fase 6 terminada.** El paquete instala, tiene los 16 campos de
 > ofuscación, levanta y baja túneles desde la GUI supervisando un proceso
-> `amneziawg-go` por túnel, y tiene watchdog para los que se caen solos. El
+> `amneziawg-go` por túnel, tiene watchdog para los que se caen solos, y entrega
+> la configuración del cliente por los tres caminos: descarga, QR y mail. El
 > caudal sobre el hardware objetivo está medido: ~830 Mbps, y ofuscar no cuesta
 > rendimiento.
 
@@ -23,7 +24,7 @@ firma.
 | 3 | Los 16 campos de ofuscación | ✅ verificados de punta a punta el 13-08-2026 |
 | 4 | Supervisión de los procesos | ✅ 6 propiedades verificadas el 13-08-2026 |
 | 5 | Watchdog | ✅ 20 propiedades verificadas el 13-08-2026 |
-| 6 | Integración con wgeasy | ⬜ el que sigue |
+| 6 | Configs de cliente: descarga, QR y mail | ✅ 174 tests locales y 61 en el firewall, el 14-08-2026 |
 
 Lo verificado en la fase 2, sobre el firewall: `pkg add` corre `awg_install()`
 entero, las dos entradas de menú quedan registradas, las cuatro páginas y el JS
@@ -94,6 +95,7 @@ está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
 ```sh
 .tools\php\php.exe tools\test-obfuscation.php   # 38 tests de validación
 .tools\php\php.exe tools\test-client-conf.php   # 75 tests del .conf del cliente
+.tools\php\php.exe tools\test-mail.php          # 61 tests del envío por mail
 sh tools/check-calls.sh                         # llamadas a funciones awg_* que no existen
 sh tools/check-collisions.sh                    # símbolos globales vs WireGuard
 sh tools/check-globals.sh                       # $awgg sin declarar global
@@ -103,27 +105,29 @@ Los dos últimos existen por bugs que llegaron a un firewall de verdad: uno borr
 un cron del sistema (fase 5 en `docs/arquitectura.md`) y el otro tiró un fatal
 al guardar un peer. `php -l` no ve ninguno de los dos.
 
-Y hay dos sondas que corren **sobre el firewall**, contra el paquete instalado,
+Y hay tres sondas que corren **sobre el firewall**, contra el paquete instalado,
 porque hay cosas que solo se ven ahí:
 
 ```sh
-scp spike/verify-client-conf.php spike/verify-peer-save.php admin@FIREWALL:/root/
+scp spike/verify-client-conf.php spike/verify-mail.php spike/verify-peer-save.php admin@FIREWALL:/root/
 ssh admin@FIREWALL 'php /root/verify-client-conf.php'   # el .conf contra awg(8)
+ssh admin@FIREWALL 'php /root/verify-mail.php'          # el mail contra PEAR Mail
 ssh admin@FIREWALL 'php /root/verify-peer-save.php'     # el alta de un peer entera
 ```
 
-La segunda escribe `config.xml`, hace respaldo antes y restaura al salir.
+La del mail no manda ningún mensaje: el único envío que intenta va contra
+`127.0.0.1:1`, que rechaza la conexión. La última escribe `config.xml`, hace
+respaldo antes y restaura al salir.
 
-### Próximo paso concreto
+### La fase 6: las configs de cliente
 
-**Fase 6: configs de cliente.** Generación del `.conf` del cliente con QR, zip y
-mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de las
-referencias tiene y la que hace usable el modo servidor. Va **dentro de la
-página de peers que ya existe**, no en un módulo aparte: wgeasy tiene que
-atornillarse por afuera porque no puede tocar el paquete oficial de WireGuard,
-pero acá la página de peer es propia.
+Generación del `.conf` del cliente con QR, zip y mail, incluyendo los parámetros
+de ofuscación. Es la pieza que ninguna de las referencias tiene y la que hace
+usable el modo servidor. Va **dentro de la página de peers que ya existe**, no en
+un módulo aparte: wgeasy tiene que atornillarse por afuera porque no puede tocar
+el paquete oficial de WireGuard, pero acá la página de peer es propia.
 
-Empezada, y ya se puede usar. La página de peers quedó al nivel de la de wgeasy:
+La página de peers quedó al nivel de la de wgeasy:
 mismos campos y mismas ayudas, el par de claves generado desde la página, la
 próxima dirección libre a un botón, y **todo lo que sale del túnel elegido
 —puerto, MTU, DNS, redes y los 16 parámetros de ofuscación— tomado del túnel**,
@@ -172,17 +176,65 @@ dónde y cuándo se lo vio— con umbral de actividad configurable y la opción 
 mostrar también los desconectados.
 
 Verificado en los dos lados: 75 tests de lógica en `tools/test-client-conf.php`,
-y 31 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
+y 36 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
 `awg(8)` parsee el archivo generado —con control negativo—, que todo lo que se
 calcula del túnel aguante una instalación sin ningún túnel, y que lo detectado
 sea realmente discable.
 
 En la lista de peers, cada peer exportable tiene además los iconos de
-**descargar** y **QR** al lado de editar. La descarga va comprimida: todo
-cliente acepta un archivo, y un `.zip` sobrevive a que lo pasen por mail o por
-un mensajero, cosa que un `.conf` pelado muchas veces no.
+**descargar**, **QR** y **mail** al lado de editar. La descarga va comprimida:
+todo cliente acepta un archivo, y un `.zip` sobrevive a que lo pasen por mail o
+por un mensajero, cosa que un `.conf` pelado muchas veces no.
 
-Falta el envío por mail, que es el tercer icono que tiene wgeasy.
+### El envío por mail, y lo que apareció al medirlo
+
+El tercer camino de salida del mismo archivo. Usa el SMTP que el firewall ya
+tiene configurado en *System → Advanced → Notifications*: un paquete de VPN no
+tiene por qué pedir de nuevo un servidor de correo, ni guardar una segunda copia
+de esa contraseña. Se manda el **mismo `.zip`** que entrega la descarga, para que
+sea el mismo archivo por los dos caminos.
+
+El camino obvio —y el que usa wgeasy— es PHPMailer, que adjunta solo. Medido
+sobre 2.9.0-BETA con `spike/verify-mail.php`: **PHPMailer no existe en pfSense**.
+No está la clase, no está el archivo, no está en ningún lado. Lo que hay es
+**PEAR Mail**, que es lo que usa el propio `send_smtp_message()` del sistema. Un
+camino que no puede correr no es un respaldo, así que el adjunto se arma
+construyendo el MIME a mano sobre PEAR Mail. Sin esa medición el adjunto no
+habría funcionado nunca y el síntoma habría sido "siempre llega pegado en el
+cuerpo", sin ningún error.
+
+Quedan dos caminos igual, y el segundo existe por una razón distinta de la que
+parece: el respaldo —`send_smtp_message()`, que pega el archivo en el cuerpo— no
+cubre que el servidor esté caído, porque si lo está fallan los dos. Cubre que el
+MIME que armamos nosotros esté mal, que es lo único que ese camino no comparte.
+
+Leer la configuración de pfSense tiene tres trampas, y las tres están mal en
+wgeasy —de donde salió este código—:
+
+| se lee | lo que hay de verdad | qué pasa si se lee mal |
+|---|---|---|
+| `authentication_mech` | `authentication_mechanism` | se manda sin autenticar y el servidor rechaza |
+| `isset(ssl_validate)` | `sslvalidate` = `enabled`/`disabled` | la validación del certificado queda siempre apagada |
+| `tls` | no existe, la página solo ofrece SSL | rama muerta |
+
+Y una cuarta en el respaldo: `send_smtp_message()` devuelve **null si salió bien
+y la cadena del error si falló**, así que el `!== false` de wgeasy informa como
+éxito un envío que falló. Además se planta sin hacer nada si las notificaciones
+están deshabilitadas, salvo que se la fuerce — acá se la fuerza, porque esto no
+es una notificación automática sino alguien que apretó *Send*.
+
+Verificado con 61 tests locales en `tools/test-mail.php` —incluido que el binario
+del adjunto vuelva idéntico del base64, que ninguna línea pase de 76 caracteres y
+que por el cuerpo viaje el `.conf` en texto y nunca el zip— y 25 contra el
+firewall con `spike/verify-mail.php`, que además prueba el error de un servidor
+que no contesta contra PEAR de verdad, sin mandar ningún mensaje.
+
+### Próximo paso concreto
+
+**Un selector de versión 1.x / 2.0 en la página del túnel.** Hoy son 16 campos de
+ofuscación sin nada que indique cuáles van juntos, y equivocarse no es un error
+suave: `awg(8)` aborta el `.conf` entero ante una clave que no conoce, así que el
+túnel simplemente no levanta.
 
 ## Por dónde empezar
 

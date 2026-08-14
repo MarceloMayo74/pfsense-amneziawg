@@ -35,6 +35,7 @@ require_once('guiconfig.inc');
 require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
 require_once('amneziawg/includes/awg_client.inc');
+require_once('amneziawg/includes/awg_mail.inc');
 
 global $awgg;
 
@@ -45,6 +46,9 @@ $pconfig = [];
 $is_new = true;
 $peer_idx = null;
 $tun_name = null;
+$act = '';
+$input_errors = array();
+$savemsg = null;
 
 if (isset($_REQUEST['tun'])) {
 	$tun_name = $_REQUEST['tun'];
@@ -139,6 +143,34 @@ if ($_POST) {
 			print($conf);
 			exit;
 
+		case 'email':
+			/*
+			 * Se rearma igual que la descarga, y por lo mismo: lo que se manda
+			 * es lo que esta guardado, no lo que muestra el formulario de
+			 * arriba, que puede tener cambios sin guardar.
+			 */
+			$conf = awg_client_conf_from_peer($peer_idx, $error);
+
+			if ($conf === false) {
+				$input_errors[] = $error;
+				break;
+			}
+
+			[$ml_idx, $ml_peer, $ml_is_new] = awg_peer_get_config($peer_idx, false);
+
+			$sent = awg_mail_send_client_conf($_POST['email'] ?? '',
+				$conf,
+				awg_client_conf_filename($ml_peer['descr']),
+				$ml_peer['descr']);
+
+			if ($sent['success']) {
+				$savemsg = $sent['message'];
+			} else {
+				$input_errors[] = $sent['message'];
+			}
+
+			break;
+
 		default:
 			// Shouldn't be here, so bail out.
 			header('Location: /awg/vpn_awg_peers.php');
@@ -156,8 +188,12 @@ if (is_numericint($peer_idx) && is_array(config_get_path("installedpackages/amne
  * Un peer existente se lee de la configuracion; uno nuevo arranca con lo que el
  * tunel puede contestar por si mismo y con lo que se eligio para el cliente
  * anterior del mismo tunel, que casi siempre es lo que se quiere de nuevo.
+ *
+ * Mandar el archivo por mail entra por aca aunque sea un post: no toca el peer
+ * ni el formulario, asi que la pagina tiene que quedar igual que si se hubiera
+ * entrado por GET. Sin esto el formulario se dibuja vacio despues de enviar.
  */
-if (!$_POST) {
+if (!$_POST || ($act == 'email')) {
 	if (!$is_new) {
 		$peer = config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}");
 		$store = awg_client_store($peer);
@@ -233,6 +269,10 @@ awg_print_service_warning();
 
 if (!empty($input_errors)) {
 	print_input_errors($input_errors);
+}
+
+if (!empty($savemsg)) {
+	print_info_box($savemsg, 'success');
 }
 
 display_top_tabs($tab_array);
@@ -614,6 +654,25 @@ if ($client_conf !== false):
 				</a>
 				<div id="awg_qr_hidden" style="display: none;"></div>
 				<span class="help-block"><?=gettext('This is what is saved right now, not what the form above shows. Save first to include any change.')?></span>
+				<!--
+					El envio por mail va en su propio formulario por lo mismo
+					que la descarga: este panel se dibuja fuera del principal.
+				-->
+				<form action="/awg/vpn_awg_peers_edit.php" method="post" class="form-inline">
+					<input type="hidden" name="peer" value="<?=htmlspecialchars((string) $peer_idx)?>" />
+					<input type="hidden" name="act" value="email" />
+					<div class="form-group">
+						<label for="email"><?=gettext('Send by email')?>&nbsp;</label>
+						<input type="email" name="email" id="email" class="form-control" placeholder="user@example.com" size="32" required="required" />
+					</div>
+					<button type="submit" class="btn btn-primary btn-sm" title="<?=gettext('Send the client configuration by email')?>">
+						<i class="fa-solid fa-paper-plane icon-embed-btn"></i>
+						<?=gettext('Send')?>
+					</button>
+					<span class="help-block">
+						<?=gettext('Uses the SMTP server configured under System > Advanced > Notifications. Email is not encrypted in transit end to end; prefer the QR code or the download for sensitive deployments.')?>
+					</span>
+				</form>
 			</div>
 			<div class="col-sm-5 text-center">
 				<div id="awg_qr"></div>
