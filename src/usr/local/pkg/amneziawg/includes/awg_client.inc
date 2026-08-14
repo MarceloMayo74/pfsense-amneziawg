@@ -1310,13 +1310,35 @@ function awg_client_do_peer_post($post) {
 		             'peer_idx' => $peer_idx);
 	}
 
+	/*
+	 * El peer se guarda SIEMPRE sin endpoint, y eso es deliberado.
+	 *
+	 * El campo Endpoint de esta pagina es la direccion por la que el CLIENTE
+	 * disca a este firewall. El endpoint de un peer, en WireGuard y en la
+	 * pagina nativa, significa lo contrario: donde el firewall disca AL peer.
+	 * Son la misma palabra para las dos puntas opuestas del mismo tunel.
+	 *
+	 * Guardarlo en el peer no da ningun error: el .conf ni siquiera lo lleva
+	 * -- awg_make_tunnel_conf_file() lo omite -- pero awg_resolve_endpoints()
+	 * lo resuelve y se lo clava a la interfaz viva con "awg set". A partir de
+	 * ahi el servidor le manda la respuesta del handshake a su propia WAN en
+	 * vez de a donde esta el cliente. El telefono se queda en "connecting" para
+	 * siempre, los contadores del peer se mueven, y no hay una sola linea de
+	 * log que lo explique.
+	 *
+	 * Un cliente generado es por definicion roadwarrior: su direccion la
+	 * aprende el servidor del handshake que llega, y por eso va como dynamic.
+	 * La direccion que necesita el archivo del cliente se guarda aparte, en el
+	 * client store de mas abajo.
+	 */
 	$peer_post = array(
 		'index'			=> $edit_idx,
 		'enabled'		=> $pconfig['enabled'],
 		'tun'			=> $pconfig['tun'],
 		'descr'			=> $pconfig['descr'],
-		'endpoint'		=> $genera ? $pconfig['endpoint'] : '',
-		'port'			=> $genera ? $pconfig['port'] : '',
+		'dynamic'		=> 'yes',
+		'endpoint'		=> '',
+		'port'			=> '',
 		'persistentkeepalive'	=> null,
 		'publickey'		=> $pconfig['publickey'],
 		'presharedkey'		=> empty($pconfig['presharedkey']) ? null : $pconfig['presharedkey']);

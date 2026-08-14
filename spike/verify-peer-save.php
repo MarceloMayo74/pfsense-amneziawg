@@ -121,7 +121,19 @@ $peer = $peers[$idx] ?? array();
 check('es el peer que se acaba de crear', ($peer['descr'] ?? '') === 'verify-peer-save');
 check('con su clave publica derivada de la privada',
 	($peer['publickey'] ?? '') === $keypair['pubkey']);
-check('el endpoint quedo en el peer', ($peer['endpoint'] ?? '') === 'vpn.example.com');
+/*
+ * Este test estaba escrito al reves, y afirmaba el bug como si fuera lo
+ * correcto: "el endpoint quedo en el peer". El endpoint de un peer es donde el
+ * FIREWALL disca al peer; el de esta pagina es donde el CLIENTE disca al
+ * firewall. Guardarlo en el peer hace que awg_resolve_endpoints() se lo clave a
+ * la interfaz viva, y el servidor termina mandandole la respuesta del handshake
+ * a su propia WAN. El telefono se queda en "connecting" sin un solo error.
+ */
+check('el endpoint NO quedo en el peer', empty($peer['endpoint']),
+	'esta guardado como ' . var_export($peer['endpoint'] ?? null, true)
+	. ': el servidor le va a hablar a esa direccion en vez de al cliente');
+check('ni el puerto', empty($peer['port']),
+	var_export($peer['port'] ?? null, true));
 check('el keepalive NO quedo en el peer', empty($peer['persistentkeepalive']));
 check('la direccion quedo como AllowedIPs',
 	count((array) ($peer['allowedips']['row'] ?? array())) === 1);
@@ -139,6 +151,13 @@ check('guardo la clave privada del cliente',
 check('guardo el DNS elegido', ($store['dns'] ?? '') === '10.9.9.1');
 check('guardo el keepalive del lado del cliente',
 	($store['persistentkeepalive'] ?? '') === '25');
+
+// El endpoint vive aca, que es el unico lugar donde significa lo que dice
+check('guardo el endpoint por donde disca el cliente',
+	($store['endpoint'] ?? '') === 'vpn.example.com',
+	var_export($store['endpoint'] ?? null, true));
+check('con su puerto', !empty($store['port']),
+	var_export($store['port'] ?? null, true));
 
 printf("\n=== el archivo del cliente ===\n\n");
 

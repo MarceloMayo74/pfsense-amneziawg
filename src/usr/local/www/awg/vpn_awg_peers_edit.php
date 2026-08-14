@@ -342,7 +342,9 @@ $group->add(new Form_Input(
 	['placeholder' => 'vpn.example.com']
 ))->addClass('trim')
   ->setHelp('Hostname, IPv4, or IPv6 address of this firewall as reachable by the client. ' .
-	    'Written to the client file and stored on this peer.')
+	    'This is where the client dials in, and it is written to the client file. ' .
+	    'It is not the peer endpoint: the firewall never dials a client, it learns ' .
+	    'where the client is from the handshake it receives.')
   ->setWidth(4);
 
 /*

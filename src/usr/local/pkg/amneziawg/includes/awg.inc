@@ -319,6 +319,16 @@ function awg_resolve_endpoints() {
 
 	// Do we have any peers?
 	foreach (config_get_path('installedpackages/amneziawg/peers/item', []) as $peer) {
+		/*
+		 * Un peer sin endpoint no tiene nada que resolver: es un roadwarrior, y
+		 * el servidor aprende donde esta del handshake que le llega. Sin este
+		 * corte se arma un endpoint de solo puerto -- ":51820" -- y se lo pasa
+		 * a "awg set", que lo rechaza.
+		 */
+		if (empty($peer['endpoint'])) {
+			continue;
+		}
+
 		if (!$dns_available && !is_ipaddr($peer['endpoint'])) {
 			continue;
 		}
