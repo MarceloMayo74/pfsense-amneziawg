@@ -92,9 +92,18 @@ if ($_POST) {
 				 * la lista: ahi abajo esta el QR y el archivo recien generado,
 				 * que es lo que se vino a buscar. Un peer sin cliente no tiene
 				 * nada mas que mostrar, asi que ese sale a la lista.
+				 *
+				 * El redirect se pide, pero la pagina NO depende de el: si algo
+				 * ya mando salida, header() no hace nada y se sigue dibujando
+				 * aca mismo. Sin la linea de abajo, ese caso dibuja el
+				 * formulario sin el panel del cliente -- $peer_idx sale de
+				 * $_REQUEST['peer'], que en un alta no viene -- y el QR recien
+				 * generado no aparece hasta volver a entrar por el lapiz.
 				 */
 				if (!is_null($res['peer_idx']) && ($pconfig['client_enable'] == 'yes')) {
-					header("Location: /awg/vpn_awg_peers_edit.php?peer={$res['peer_idx']}");
+					$peer_idx = $res['peer_idx'];
+
+					header("Location: /awg/vpn_awg_peers_edit.php?peer={$peer_idx}");
 				} else {
 					header('Location: /awg/vpn_awg_peers.php');
 				}
@@ -607,6 +616,26 @@ $form->addGlobal(new Form_Input(
 	'save'
 ));
 
+/*
+ * El boton de guardar va ADENTRO del formulario, no en un <nav> de abajo.
+ *
+ * El arbol venia del paquete nativo, donde el boton es un <button> suelto
+ * despues de print($form) -- o sea fuera de todo formulario -- y lo hace andar
+ * un $(form).submit() por javascript. Eso funciona mientras haya un solo
+ * formulario en la pagina. Abajo hay dos mas, el de descarga y el de mail, y el
+ * de mail tiene un campo required: apretar Save terminaba pidiendo la direccion
+ * de correo para guardar un peer.
+ *
+ * Un Form_Button lo pone adentro del formulario que corresponde, que es lo que
+ * hace wgeasy, y de paso la pagina sigue guardando con javascript deshabilitado.
+ */
+$form->addGlobal(new Form_Button(
+	'saveform',
+	'Save Peer',
+	null,
+	'fa-solid fa-save'
+))->addClass('btn-primary');
+
 print($form);
 
 /*
@@ -696,13 +725,6 @@ if ($client_conf !== false):
 <?php endif; ?>
 
 <?php endif; ?>
-
-<nav class="action-buttons">
-	<button type="submit" id="saveform" name="saveform" class="btn btn-primary btn-sm" value="save" title="<?=gettext('Save Peer')?>">
-		<i class="fa-solid fa-save icon-embed-btn"></i>
-		<?=gettext("Save Peer")?>
-	</button>
-</nav>
 
 <?php
 $genkeywarning = gettext("Overwrite pre-shared key? Click 'ok' to overwrite key.");
@@ -908,11 +930,6 @@ events.push(function() {
 	$('#client_enable').click(updateClientMode);
 
 	updateClientMode();
-
-	// Save the form
-	$('#saveform').click(function () {
-		$(form).submit();
-	});
 
 <?php if (($client_conf !== false) && !is_null($qrcode_js)): ?>
 	// Dibujar y descargar el codigo vive en awg_qr.js, porque la lista de peers

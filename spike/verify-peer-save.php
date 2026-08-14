@@ -109,6 +109,31 @@ $peers = config_get_path('installedpackages/amneziawg/peers/item', []);
 check('hay un peer mas', count($peers) === count($peers_antes) + 1,
 	count($peers) . ' vs ' . (count($peers_antes) + 1));
 
+/*
+ * A donde manda la pagina despues de guardar. Un peer con cliente tiene que
+ * volver a SU propia pagina, que es donde esta el QR recien generado; si se va
+ * a la lista, hay que salir y entrar de nuevo por el lapiz para verlo.
+ *
+ * Se reproduce la condicion exacta de vpn_awg_peers_edit.php en vez de
+ * describirla, para que este test falle si alguien la cambia.
+ */
+$pconfig_post = $res['pconfig'];
+
+$destino = (!is_null($res['peer_idx']) && ($pconfig_post['client_enable'] == 'yes'))
+	? "/awg/vpn_awg_peers_edit.php?peer={$res['peer_idx']}"
+	: '/awg/vpn_awg_peers.php';
+
+printf("  redirige a: %s\n", $destino);
+
+check('un peer con cliente vuelve a su propia pagina',
+	strpos($destino, 'vpn_awg_peers_edit.php?peer=') !== false,
+	'peer_idx=' . var_export($res['peer_idx'], true)
+	. ' client_enable=' . var_export($pconfig_post['client_enable'] ?? null, true));
+
+check('con un indice utilizable en la URL',
+	is_numericint((string) $res['peer_idx']),
+	var_export($res['peer_idx'], true));
+
 $idx = $res['pconfig']['index'];
 
 printf("  indice devuelto: %s\n", var_export($idx, true));
