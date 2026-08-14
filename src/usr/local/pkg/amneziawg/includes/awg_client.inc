@@ -1331,7 +1331,17 @@ function awg_client_do_peer_post($post) {
 	if (empty($input_errors)) {
 		$changes	= $res['changes'];
 		$tuns_to_sync	= $res['tuns_to_sync'];
-		$peer_idx	= $res['peer_idx'];
+
+		/*
+		 * El indice se busca POR CLAVE PUBLICA y no se toma del guardado.
+		 *
+		 * awg_peer_get_config() calcula el de un peer nuevo como count() + 1,
+		 * asi que para el primer peer devuelve 1; despues, al escribirse y
+		 * releerse el XML -- que es una lista de <item> y no un mapa -- queda
+		 * en 0. Guardar los datos del cliente contra ese indice no encontraba
+		 * nada y se perdian EN SILENCIO: el peer quedaba bien y sin cliente.
+		 */
+		$peer_idx = awg_peer_get_array_idx($pconfig['publickey'], $pconfig['tun']);
 
 		$pconfig['index'] = $peer_idx;
 
@@ -1343,7 +1353,7 @@ function awg_client_do_peer_post($post) {
 		 * Sin generacion se guarda vacio, que es lo que apaga la exportacion de
 		 * un peer que antes la tenia.
 		 */
-		awg_client_save_store($peer_idx, $genera ? array(
+		$saved = awg_client_save_store($peer_idx, $genera ? array(
 			'privatekey'		=> $pconfig['privatekey'],
 			'address'		=> awg_client_addresses_to_line($addresses),
 			'dns'			=> $pconfig['dns'],
@@ -1353,11 +1363,48 @@ function awg_client_do_peer_post($post) {
 			'routing'		=> $pconfig['routing'],
 			'allowedips'		=> awg_client_addresses_to_line($client_allowedips),
 			'persistentkeepalive'	=> $pconfig['persistentkeepalive']) : array());
+
+		/*
+		 * Que esto falle callado es como se perdio una configuracion de cliente
+		 * entera: el peer se guardaba, la pagina no decia nada, y el archivo no
+		 * existia. Si no se pudo escribir hay que decirlo.
+		 */
+		if ($genera && !$saved) {
+			$input_errors[] = gettext('The peer was saved, but its client settings could not be stored.');
+		}
 	}
 
 	return array('input_errors' => $input_errors, 'changes' => $changes,
 	             'tuns_to_sync' => $tuns_to_sync, 'pconfig' => $pconfig,
 	             'peer_idx' => $peer_idx);
+}
+
+/*
+ * Aplica los cambios pendientes.
+ *
+ * Es exactamente lo que hace el boton "Apply Changes" de la lista de peers, y
+ * a proposito aplica TODOS los tuneles pendientes y no solo el que se acaba de
+ * tocar: un cambio que quedo pendiente desde otra pagina no tiene por que
+ * perderse en silencio.
+ */
+function awg_client_apply_changes() {
+	global $awgg;
+
+	$ret_code = 0;
+
+	if (is_subsystem_dirty($awgg['subsystems']['awg'])) {
+		if (awg_is_service_running()) {
+			$sync_status = awg_tunnel_sync(awg_apply_list_get('tunnels'), true, true);
+
+			$ret_code |= $sync_status['ret_code'];
+		}
+
+		if ($ret_code == 0) {
+			clear_subsystem_dirty($awgg['subsystems']['awg']);
+		}
+	}
+
+	return $ret_code;
 }
 
 /*

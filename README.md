@@ -93,13 +93,26 @@ está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
 
 ```sh
 .tools\php\php.exe tools\test-obfuscation.php   # 38 tests de validación
-.tools\php\php.exe tools\test-client-conf.php   # 32 tests del .conf del cliente
+.tools\php\php.exe tools\test-client-conf.php   # 75 tests del .conf del cliente
+sh tools/check-calls.sh                         # llamadas a funciones awg_* que no existen
 sh tools/check-collisions.sh                    # símbolos globales vs WireGuard
 sh tools/check-globals.sh                       # $awgg sin declarar global
 ```
 
-El último existe porque esa clase de bug borró un cron del sistema en un
-firewall de verdad. Ver la fase 5 en `docs/arquitectura.md`.
+Los dos últimos existen por bugs que llegaron a un firewall de verdad: uno borró
+un cron del sistema (fase 5 en `docs/arquitectura.md`) y el otro tiró un fatal
+al guardar un peer. `php -l` no ve ninguno de los dos.
+
+Y hay dos sondas que corren **sobre el firewall**, contra el paquete instalado,
+porque hay cosas que solo se ven ahí:
+
+```sh
+scp spike/verify-client-conf.php spike/verify-peer-save.php admin@FIREWALL:/root/
+ssh admin@FIREWALL 'php /root/verify-client-conf.php'   # el .conf contra awg(8)
+ssh admin@FIREWALL 'php /root/verify-peer-save.php'     # el alta de un peer entera
+```
+
+La segunda escribe `config.xml`, hace respaldo antes y restaura al salir.
 
 ### Próximo paso concreto
 

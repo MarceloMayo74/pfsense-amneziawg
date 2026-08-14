@@ -79,7 +79,7 @@ if ($_POST) {
 					awg_apply_list_add('tunnels', $res['tuns_to_sync']);
 
 					if ($pconfig['applynow'] == 'yes') {
-						awg_apply_list_apply('tunnels');
+						awg_client_apply_changes();
 					}
 				}
 
