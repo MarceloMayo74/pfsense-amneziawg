@@ -157,6 +157,20 @@ descargar. Queda ahí para siempre, no solo en el momento de crearlo: el teléfo
 no siempre está a mano cuando uno da de alta el peer, y volver a buscarlo no
 debería obligar a re-clavear al cliente.
 
+La app de Android es **AmneziaWG**
+([amneziawg-android](https://github.com/amnezia-vpn/amneziawg-android), en Google
+Play), que importa un `.conf` común o su QR. La app oficial de WireGuard **no
+sirve**: no conoce `Jc`, `S1` ni `H1`. Y ojo con no confundirla con AmneziaVPN,
+la app multiprotocolo, que comparte configuraciones en un formato codificado
+propio. Un detalle del que ya estamos a salvo: la app de Android falla al
+importar si el archivo trae campos `I2`–`I5` **vacíos**, y `awg_obfuscation_pairs()`
+nunca escribe un campo vacío.
+
+Y hay un **widget de peers** para el dashboard, aparte del que vino del fork:
+ese lista un renglón por túnel, y este uno por peer —quién está conectado, desde
+dónde y cuándo se lo vio— con umbral de actividad configurable y la opción de
+mostrar también los desconectados.
+
 Verificado en los dos lados: 75 tests de lógica en `tools/test-client-conf.php`,
 y 31 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
 `awg(8)` parsee el archivo generado —con control negativo—, que todo lo que se
