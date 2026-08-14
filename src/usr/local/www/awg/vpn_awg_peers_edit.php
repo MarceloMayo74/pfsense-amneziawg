@@ -631,6 +631,7 @@ if ($client_conf !== false):
 
 <?php if (!is_null($qrcode_js)): ?>
 <script src="<?=htmlspecialchars($qrcode_js)?>"></script>
+<script src="<?=htmlspecialchars(awg_client_asset_url('/awg/js/awg_qr.js'))?>"></script>
 <?php endif; ?>
 
 <?php endif; ?>
@@ -853,149 +854,21 @@ events.push(function() {
 	});
 
 <?php if (($client_conf !== false) && !is_null($qrcode_js)): ?>
-	var awgQrSize = <?=(int) $awgg['qr_size']?>;
-	var awgQrDisplaySize = <?=(int) $awgg['qr_display_size']?>;
-	var awgQrQuietZone = <?=(int) $awgg['qr_quiet_zone']?>;
-	var awgQrLevel = <?=json_encode($awgg['qr_level'], $jsflags)?>;
+	// Dibujar y descargar el codigo vive en awg_qr.js, porque la lista de peers
+	// hace lo mismo desde su icono de QR.
+	awgQr.size		= <?=(int) $awgg['qr_size']?>;
+	awgQr.displaySize	= <?=(int) $awgg['qr_display_size']?>;
+	awgQr.quietZone		= <?=(int) $awgg['qr_quiet_zone']?>;
+	awgQr.level		= <?=json_encode($awgg['qr_level'], $jsflags)?>;
+
 	var awgConfName = <?=json_encode(awg_client_conf_filename($pconfig['descr']), $jsflags)?>;
 
-	/*
-	 * Arregla tres cosas que la libreria deja mal en el <svg> que arma:
-	 *
-	 *  - usa width="100%" height="100%" e ignora el tamano que se le pidio, asi
-	 *    que adentro de un contenedor sin altura el codigo colapsa a nada
-	 *  - no deja zona tranquila, y el estandar pide cuatro modulos vacios de
-	 *    cada lado para que un lector encuentre el codigo
-	 *  - omite el xmlns, con lo cual una copia serializada no carga como imagen
-	 */
-	function awgFixQrSvg(holder, size) {
-		var svg = holder.querySelector('svg');
-
-		if (!svg) {
-			return null;
-		}
-
-		var box = (svg.getAttribute('viewBox') || '').split(/\s+/);
-		var modules = (box.length === 4) ? parseInt(box[2], 10) : 0;
-
-		if (modules > 0) {
-			var quiet = awgQrQuietZone;
-			var side = modules + (quiet * 2);
-
-			svg.setAttribute('viewBox', (-quiet) + ' ' + (-quiet) + ' ' + side + ' ' + side);
-
-			// El rect de fondo tiene que cubrir tambien el margen nuevo
-			for (var i = 0; i < svg.childNodes.length; i++) {
-				var node = svg.childNodes[i];
-
-				if (node.nodeName && (node.nodeName.toLowerCase() === 'rect')) {
-					node.setAttribute('x', -quiet);
-					node.setAttribute('y', -quiet);
-					node.setAttribute('width', side);
-					node.setAttribute('height', side);
-
-					break;
-				}
-			}
-		}
-
-		svg.setAttribute('width', size);
-		svg.setAttribute('height', size);
-
-		// Achicarse en pantallas angostas en vez de desbordar la columna
-		svg.setAttribute('style', 'max-width: 100%; height: auto;');
-
-		if (!svg.getAttribute('xmlns')) {
-			svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-		}
-
-		return svg;
-	}
-
-	function awgSvgDataUrl(svg) {
-		var text = new XMLSerializer().serializeToString(svg);
-
-		return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
-	}
-
-	function awgSave(dataUrl, filename) {
-		var link = document.createElement('a');
-
-		link.href = dataUrl;
-		link.download = filename;
-
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-	}
-
-	// El QR que se ve
-	new QRCode(document.getElementById('awg_qr'), {
-		text: $('#awg_conf').val(),
-		width: awgQrDisplaySize,
-		height: awgQrDisplaySize,
-		correctLevel: QRCode.CorrectLevel[awgQrLevel]
-	});
-
-	awgFixQrSvg(document.getElementById('awg_qr'), awgQrDisplaySize);
+	awgQr.render('awg_qr', $('#awg_conf').val());
 
 	$('#awg_qrdownload').show().click(function(event) {
 		event.preventDefault();
 
-		/*
-		 * Un SVG pelado se reescala a toda la ventana al abrirlo, asi que el QR
-		 * se rasteriza a un PNG de tamano fijo. El SVG queda de respaldo para
-		 * los navegadores que se nieguen a dibujarlo en un canvas.
-		 */
-		var holder = document.getElementById('awg_qr_hidden');
-
-		holder.innerHTML = '';
-
-		new QRCode(holder, {
-			text: $('#awg_conf').val(),
-			width: awgQrSize,
-			height: awgQrSize,
-			correctLevel: QRCode.CorrectLevel[awgQrLevel]
-		});
-
-		var svg = awgFixQrSvg(holder, awgQrSize);
-
-		if (!svg) {
-			return;
-		}
-
-		var svgUrl = awgSvgDataUrl(svg);
-		var img = new Image();
-
-		img.onload = function() {
-			try {
-				var canvas = document.createElement('canvas');
-
-				canvas.width = awgQrSize;
-				canvas.height = awgQrSize;
-
-				var ctx = canvas.getContext('2d');
-
-				// Fondo blanco, para que el codigo se lea en visores oscuros
-				ctx.fillStyle = '#ffffff';
-				ctx.fillRect(0, 0, awgQrSize, awgQrSize);
-				ctx.drawImage(img, 0, 0, awgQrSize, awgQrSize);
-
-				awgSave(canvas.toDataURL('image/png'), awgConfName + '.png');
-			} catch (e) {
-				awgSave(svgUrl, awgConfName + '.svg');
-			}
-
-			holder.innerHTML = '';
-		};
-
-		img.onerror = function() {
-			awgSave(svgUrl, awgConfName + '.svg');
-
-			holder.innerHTML = '';
-		};
-
-		img.src = svgUrl;
+		awgQr.download($('#awg_conf').val(), awgConfName.replace(/\.conf$/, ''));
 	});
 
 	$('#awg_copy').click(function() {

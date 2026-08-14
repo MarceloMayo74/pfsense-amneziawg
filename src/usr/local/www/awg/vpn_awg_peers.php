@@ -34,6 +34,7 @@ require_once('guiconfig.inc');
 // AmneziaWG includes
 require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
+require_once('amneziawg/includes/awg_client.inc');
 
 global $awgg;
 
@@ -61,6 +62,43 @@ if ($_POST) {
 		$peer_idx = $_POST['peer'];
 
 		switch ($_POST['act']) {
+			case 'download':
+				$client_conf = awg_client_conf_from_peer($peer_idx, $error);
+
+				if ($client_conf === false) {
+					$input_errors[] = $error;
+					break;
+				}
+
+				[$dl_idx, $dl_peer, $dl_is_new] = awg_peer_get_config($peer_idx, false);
+
+				$conf_filename = awg_client_conf_filename($dl_peer['descr']);
+
+				/*
+				 * Siempre comprimido. Todo cliente acepta un archivo, y un .zip
+				 * sobrevive a que lo pasen por mail o por un mensajero, cosa
+				 * que un .conf pelado muchas veces no: se lo renombra, se lo
+				 * abre como texto o directamente se lo bloquea.
+				 */
+				send_user_download('data',
+					awg_client_build_zip(array($conf_filename => $client_conf)),
+					awg_client_zip_filename($conf_filename));
+				exit;
+
+			case 'qrdata':
+				// El QR se dibuja en el navegador; aca solo viaja el contenido.
+				$client_conf = awg_client_conf_from_peer($peer_idx, $error);
+
+				header('Content-Type: application/json');
+				header('Cache-Control: no-store');
+
+				print(json_encode(($client_conf === false)
+					? array('error' => $error)
+					: array('conf' => $client_conf,
+					        'name' => awg_client_conf_filename(
+							awg_peer_get_config($peer_idx, false)[1]['descr']))));
+				exit;
+
 			case 'toggle':
 				$res = awg_toggle_peer($peer_idx);
 				break;
@@ -153,6 +191,10 @@ if (count(config_get_path('installedpackages/amneziawg/peers/item', [])) > 0):
 						<td style="cursor: pointer;">
 							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Peer')?>" href="<?="vpn_awg_peers_edit.php?peer={$peer_idx}"?>"></a>
 							<?=awg_generate_toggle_icon_link(($peer['enabled'] == 'yes'), 'peer', "?act=toggle&peer={$peer_idx}")?>
+<?php		if (awg_client_is_exportable($peer)): ?>
+							<a class="fa-solid fa-download" title="<?=gettext('Download the client configuration')?>" href="<?="?act=download&peer={$peer_idx}"?>" usepost></a>
+							<a class="fa-solid fa-qrcode awg-qr" title="<?=gettext('Download the QR code')?>" href="#" data-peer="<?=htmlspecialchars($peer_idx)?>"></a>
+<?php		endif; ?>
 							<a class="fa-solid fa-trash-can text-danger" title="<?=gettext('Delete Peer')?>" href="<?="?act=delete&peer={$peer_idx}"?>" usepost></a>
 						</td>
 					</tr>
@@ -213,9 +255,47 @@ events.push(function() {
 
 	});
 
+<?php if (!is_null($qrcode_js = awg_client_qrcode_js_url())): ?>
+	awgQr.size	= <?=(int) $awgg['qr_size']?>;
+	awgQr.quietZone	= <?=(int) $awgg['qr_quiet_zone']?>;
+	awgQr.level	= <?=json_encode($awgg['qr_level'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)?>;
+
+	/*
+	 * El archivo no viaja en la pagina: se pide al hacer clic. Son claves
+	 * privadas de todos los clientes, y no hay razon para tenerlas en el HTML
+	 * de una lista que se abre para cualquier otra cosa.
+	 */
+	$('.awg-qr').click(function(event) {
+		event.preventDefault();
+
+		var peer = $(this).attr('data-peer');
+
+		$.ajax({
+			url: "/awg/vpn_awg_peers.php",
+			type: "post",
+			dataType: "json",
+			data: { act: "qrdata", peer: peer },
+			success: function(resp) {
+				if (resp.error) {
+					alert(resp.error);
+
+					return;
+				}
+
+				awgQr.download(resp.conf, resp.name.replace(/\.conf$/, ''));
+			}
+		});
+	});
+<?php endif; ?>
+
 });
 //]]>
 </script>
+
+<?php if (!is_null($qrcode_js)): ?>
+<script src="<?=htmlspecialchars($qrcode_js)?>"></script>
+<script src="<?=htmlspecialchars(awg_client_asset_url('/awg/js/awg_qr.js'))?>"></script>
+<?php endif; ?>
 
 <?php
 include('amneziawg/includes/awg_foot.inc');

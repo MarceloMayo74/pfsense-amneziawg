@@ -177,7 +177,12 @@ y 31 contra el firewall con `spike/verify-client-conf.php`, que comprueba que
 calcula del túnel aguante una instalación sin ningún túnel, y que lo detectado
 sea realmente discable.
 
-Falta el zip y el envío por mail.
+En la lista de peers, cada peer exportable tiene además los iconos de
+**descargar** y **QR** al lado de editar. La descarga va comprimida: todo
+cliente acepta un archivo, y un `.zip` sobrevive a que lo pasen por mail o por
+un mensajero, cosa que un `.conf` pelado muchas veces no.
+
+Falta el envío por mail, que es el tercer icono que tiene wgeasy.
 
 ## Por dónde empezar
 

@@ -308,6 +308,41 @@ foreach ($alias as $nombre => $info) {
 
 check('lo que sale de un alias son redes, no nombres', $alias_validos);
 
+/*
+ * El zip esta escrito a mano, sin ZipArchive, asi que no alcanza con que los
+ * primeros bytes tengan pinta de zip: hay que dárselo a unzip(1) y ver que lo
+ * abra y devuelva exactamente lo que se metio.
+ */
+printf("\n=== el zip ===\n\n");
+
+$zip = awg_client_build_zip(array('telefono.conf' => $conf));
+
+check('empieza con la firma de un zip', substr($zip, 0, 4) === "PK\x03\x04",
+	bin2hex(substr($zip, 0, 4)));
+
+check('el nombre del archivo pierde el .conf',
+	awg_client_zip_filename('telefono.conf') === 'telefono.zip',
+	awg_client_zip_filename('telefono.conf'));
+
+$tmpzip = tempnam('/tmp', 'awgzip');
+chmod($tmpzip, 0600);
+file_put_contents($tmpzip, $zip);
+
+exec('unzip -l ' . escapeshellarg($tmpzip) . ' 2>&1', $listado, $rc_list);
+
+check('unzip(1) lo abre', $rc_list === 0, implode(' ', $listado));
+
+check('y adentro esta el .conf con su nombre',
+	count(preg_grep('/telefono\.conf/', $listado)) > 0, implode(' ', $listado));
+
+exec('unzip -p ' . escapeshellarg($tmpzip) . ' telefono.conf 2>/dev/null', $extraido, $rc_cat);
+
+check('el contenido sale byte por byte igual',
+	implode("\n", $extraido) === rtrim($conf, "\n"),
+	sprintf('%d lineas extraidas', count($extraido)));
+
+unlink($tmpzip);
+
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 
 exit($fail > 0 ? 1 : 0);

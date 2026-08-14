@@ -1408,19 +1408,110 @@ function awg_client_apply_changes() {
 }
 
 /*
- * La URL de la primera libreria de QR disponible, o null.
+ * Empaqueta archivos en un ZIP.
  *
- * Lleva la fecha del archivo como parametro para que un navegador no sirva una
- * version vieja despues de actualizar el paquete.
+ * Escrito a mano y no con ZipArchive, que depende de una extension de PHP que
+ * no esta garantizada. Las entradas van SIN comprimir: un archivo de cliente
+ * pesa unos cientos de bytes, comprimirlo no gana nada, y guardarlo tal cual
+ * deja esto en escribir encabezados y nada mas.
+ *
+ * $files es nombre => contenido.
+ */
+function awg_client_build_zip($files) {
+	$entries = $central = '';
+
+	$offset = 0;
+
+	$now = getdate();
+
+	// Hora y fecha empaquetadas al estilo MS-DOS, que es lo que pide el formato
+	$dostime = ($now['hours'] << 11) | ($now['minutes'] << 5) | ($now['seconds'] >> 1);
+	$dosdate = (($now['year'] - 1980) << 9) | ($now['mon'] << 5) | $now['mday'];
+
+	foreach ((array) $files as $name => $content) {
+		$crc = crc32($content);
+		$size = strlen($content);
+
+		$local	= "PK\x03\x04"
+			. pack('v', 20)			// version necesaria para extraer
+			. pack('v', 0)			// flags de proposito general
+			. pack('v', 0)			// metodo 0, almacenado
+			. pack('v', $dostime)
+			. pack('v', $dosdate)
+			. pack('V', $crc)
+			. pack('V', $size)		// tamano comprimido
+			. pack('V', $size)		// tamano sin comprimir
+			. pack('v', strlen($name))
+			. pack('v', 0)			// largo del campo extra
+			. $name;
+
+		$entries .= $local . $content;
+
+		$central .= "PK\x01\x02"
+			. pack('v', 20)			// version que lo creo
+			. pack('v', 20)			// version necesaria
+			. pack('v', 0)
+			. pack('v', 0)
+			. pack('v', $dostime)
+			. pack('v', $dosdate)
+			. pack('V', $crc)
+			. pack('V', $size)
+			. pack('V', $size)
+			. pack('v', strlen($name))
+			. pack('v', 0)			// extra
+			. pack('v', 0)			// comentario
+			. pack('v', 0)			// numero de disco
+			. pack('v', 0)			// atributos internos
+			. pack('V', 32)			// atributos externos, archivo
+			. pack('V', $offset)
+			. $name;
+
+		$offset += strlen($local) + $size;
+	}
+
+	$count = count((array) $files);
+
+	$end	= "PK\x05\x06"
+		. pack('v', 0)				// este disco
+		. pack('v', 0)				// disco con el directorio central
+		. pack('v', $count)
+		. pack('v', $count)
+		. pack('V', strlen($central))
+		. pack('V', $offset)
+		. pack('v', 0);				// largo del comentario
+
+	return $entries . $central . $end;
+}
+
+/*
+ * El nombre del archivo comprimido que le corresponde a un .conf.
+ */
+function awg_client_zip_filename($conf_filename) {
+	return preg_replace('/\.conf$/i', '', (string) $conf_filename) . '.zip';
+}
+
+/*
+ * La URL de un archivo servido por la GUI, con la fecha del archivo como
+ * parametro para que un navegador no sirva una version vieja despues de
+ * actualizar el paquete. Devuelve null si no existe.
+ */
+function awg_client_asset_url($url) {
+	global $awgg;
+
+	$path = "{$awgg['www_root']}{$url}";
+
+	return file_exists($path) ? "{$url}?v=" . filemtime($path) : null;
+}
+
+/*
+ * La URL de la primera libreria de QR disponible, o null.
  */
 function awg_client_qrcode_js_url() {
 	global $awgg;
 
 	foreach ($awgg['qrcode_js'] as $url) {
-		$path = "{$awgg['www_root']}{$url}";
-
-		if (file_exists($path)) {
-			return "{$url}?v=" . filemtime($path);
+		if ($found = awg_client_asset_url($url)) {
+			return $found;
 		}
 	}
 
