@@ -2,7 +2,9 @@
 
 > **Estado al 14-08-2026: RESUELTO y verificado de punta a punta.** El teléfono
 > conecta por **las dos WAN**, incluida la que no tiene el default gateway.
-> Queda solo la fase 5, mandarlo upstream.
+> Mandado upstream el 14-08-2026: [amnezia-vpn/amneziawg-go#180][pr].
+
+[pr]: https://github.com/amnezia-vpn/amneziawg-go/pull/180
 
 **Objetivo.** Que `amneziawg-go` responda desde la misma dirección por la que
 llegó el paquete, como hace `if_wg` en el kernel. Con eso el paquete anda en
@@ -94,10 +96,19 @@ mismo truco que usa la implementación de Linux guardando el cmsg crudo en
      matchea el estado de la regla de WAN, así que el `reply-to` que pfSense ya
      pone la rutea sola. Sin reglas agregadas.
 
-5. **Upstream.** Preparar el parche como PR a `amnezia-vpn/amneziawg-go`
-   (aplica idéntico a `wireguard-go`, que es de donde viene el archivo). Hasta
-   que lo tomen, el `.pkg` empaqueta nuestro build — que ya hace hoy, porque
-   los binarios van adentro.
+5. **Upstream. ✅** [amnezia-vpn/amneziawg-go#180][pr], sobre `master`, cuatro
+   archivos y tres líneas tocadas en uno existente. Aplica idéntico a
+   `wireguard-go`, que es de donde vienen los archivos. Hasta que lo tomen, el
+   `.pkg` empaqueta nuestro build — que ya hace hoy, porque los binarios van
+   adentro.
+
+   Dos cosas que salieron al prepararlo, por si hay que rehacerlo: los archivos
+   del repo están en CRLF y hay que pasarlos a LF o el diff se ve como un
+   archivo reescrito entero; y `GOOS=freebsd go build ./...` sobre el `master`
+   de upstream falla hoy en `golang.getoutline.org/sdk/x/smart`
+   (`undefined: lookupCNAME`), o sea que el repo no compila para FreeBSD por
+   una razón ajena a esto. El paquete `conn`, que es el único que tocamos,
+   compila y pasa `vet` en freebsd, linux, windows, darwin y openbsd.
 
 ## Riesgos
 
