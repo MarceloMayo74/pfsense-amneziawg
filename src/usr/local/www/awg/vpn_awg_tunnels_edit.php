@@ -587,6 +587,26 @@ $form->addGlobal(new Form_Input(
 	'save'
 ));
 
+/*
+ * El boton de guardar va ADENTRO del formulario, como en la pagina de peers.
+ *
+ * Venia del paquete nativo como un <button type="submit"> suelto en el <nav> de
+ * abajo -- fuera de todo formulario, donde un submit no envia nada-- y lo hacia
+ * andar un $(form).submit() por javascript. Ese "form" no es una variable
+ * declarada en ningun lado, y el formulario que imprime la clase Form no lleva
+ * id ni name. El dia que esta pagina tenga un segundo formulario, el que se
+ * envia pasa a ser cualquiera: en peers terminaba pidiendo el mail para guardar.
+ *
+ * Queda arriba de la lista de peers, que es donde termina el formulario del
+ * tunel. El <nav> de abajo sigue existiendo para Add Peer, que no guarda nada.
+ */
+$form->addGlobal(new Form_Button(
+	'saveform',
+	'Save Tunnel',
+	null,
+	'fa-solid fa-save'
+))->addClass('btn-primary');
+
 print($form);
 
 ?>
@@ -664,10 +684,6 @@ else:
 <?php
 endif;
 ?>
-	<button type="submit" id="saveform" name="saveform" class="btn btn-primary btn-sm" value="save" title="<?=gettext('Save tunnel')?>">
-		<i class="fa-solid fa-save icon-embed-btn"></i>
-		<?=gettext('Save Tunnel')?>
-	</button>
 </nav>
 
 <?php $genKeyWarning = gettext("Overwrite key pair? Click 'ok' to overwrite keys."); ?>
@@ -737,12 +753,6 @@ events.push(function() {
 				$('#publickey').val(resp.pubkey);
 			}
 		});
-	});
-
-
-	// Save the form
-	$('#saveform').click(function(event) {
-		$(form).submit();
 	});
 
 });

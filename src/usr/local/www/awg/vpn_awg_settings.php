@@ -248,26 +248,36 @@ $form->addGlobal(new Form_Input(
 	'save'
 ));
 
+/*
+ * El boton de guardar va ADENTRO del formulario, como en la pagina de peers.
+ *
+ * Venia del paquete nativo como un <button type="submit"> suelto en un <nav>
+ * impreso despues de print($form) -- fuera de todo formulario, donde un submit
+ * no envia nada-- y lo hacia andar un $(form).submit() por javascript. Ese
+ * "form" no es una variable declarada en ningun lado: ni en el arbol de
+ * pfSense, ni en su JS, ni en el nuestro, y el formulario que imprime la clase
+ * Form no lleva id ni name. Con dos formularios en la pagina el que se envia
+ * pasa a ser cualquiera: en peers terminaba pidiendo el mail para guardar.
+ *
+ * Un Form_Button queda adentro del <form> --Form::__toString los imprime antes
+ * del cierre-- asi que envia solo, sin depender de javascript ni de que esta
+ * siga siendo la unica pagina con un formulario.
+ */
+$form->addGlobal(new Form_Button(
+	'saveform',
+	'Save',
+	null,
+	'fa-solid fa-save'
+))->addClass('btn-primary');
+
 print($form);
 
 ?>
-
-<nav class="action-buttons">
-	<button type="submit" id="saveform" name="saveform" class="btn btn-sm btn-primary" value="save" title="<?=gettext('Save Settings')?>">
-		<i class="fa-solid fa-save icon-embed-btn"></i>
-		<?=gettext('Save')?>
-	</button>
-</nav>
 
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
 	awgRegTrimHandler();
-
-	// Save the form
-	$('#saveform').click(function () {
-		$(form).submit();
-	});
 
 	$('#resolve_interval_track').click(function () {
 		updateResolveInterval(this.checked);
