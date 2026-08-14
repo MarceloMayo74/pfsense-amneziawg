@@ -228,7 +228,8 @@ if (count(config_get_path('installedpackages/amneziawg/peers/item', [])) > 0):
 						</td>
 						<td><?=htmlspecialchars($peer['tun'])?></td>
 						<td><?=awg_generate_peer_allowedips_popup_link($peer_idx)?></td>
-						<td><?=htmlspecialchars(awg_format_endpoint(false, $peer))?></td>
+						<!-- A donde disca el cliente, no de donde llego: ver awg_client_dialin_endpoint() -->
+						<td><?=htmlspecialchars(awg_client_dialin_endpoint($peer) ?? awg_format_endpoint(false, $peer))?></td>
 						<td style="cursor: pointer;">
 							<a class="fa-solid fa-pencil" title="<?=gettext('Edit Peer')?>" href="<?="vpn_awg_peers_edit.php?peer={$peer_idx}"?>"></a>
 							<?=awg_generate_toggle_icon_link(($peer['enabled'] == 'yes'), 'peer', "?act=toggle&peer={$peer_idx}")?>

@@ -498,6 +498,30 @@ function awg_client_conf_from_peer($peer_idx, &$error = null) {
 }
 
 /*
+ * La direccion por la que el cliente disca a ESTE firewall, ya formateada.
+ *
+ * Es lo que lleva el archivo del cliente en su "[Peer] Endpoint", y es lo que
+ * hay que mostrar en las listas: quien administra un servidor de road warriors
+ * eligio esa direccion y ese puerto, y espera verlos donde los cargo.
+ *
+ * No confundir con el endpoint del peer, que es donde este firewall le manda
+ * los paquetes a ese peer. Para un cliente que se mueve, ese lo aprende del
+ * handshake y cambia en cada reconexion. Son dos cosas distintas y por eso van
+ * en dos columnas distintas.
+ *
+ * Devuelve null si el peer no tiene cliente generado.
+ */
+function awg_client_dialin_endpoint($peer) {
+	$store = awg_client_store($peer);
+
+	$host = trim((string) ($store['endpoint'] ?? ''));
+
+	return ($host === '')
+		? null
+		: awg_client_format_endpoint($host, $store['port'] ?? '');
+}
+
+/*
  * Junta host y puerto en el Endpoint que espera el cliente.
  *
  * Una IPv6 literal va entre corchetes: sin ellos, los dos puntos del puerto no

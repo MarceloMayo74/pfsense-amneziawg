@@ -80,7 +80,16 @@ if (empty($probe)) {
 	exit(2);
 }
 
-eval('$awgg = array(' . rtrim($fields[0], ',') . ", 'max_address_probe' => {$probe[1]});");
+// El nombre del sub-elemento donde vive el cliente, tambien del globals de verdad
+preg_match("/'client_store'\s*=>\s*'([^']+)'/", $globals, $store_key);
+
+if (empty($store_key)) {
+	fwrite(STDERR, "No se pudo leer client_store de awg_globals.inc\n");
+	exit(2);
+}
+
+eval('$awgg = array(' . rtrim($fields[0], ',')
+	. ", 'max_address_probe' => {$probe[1]}, 'client_store' => '{$store_key[1]}');");
 
 /*
  * Stubs de las funciones de red de pfSense. Son aritmetica de enteros sobre
@@ -123,6 +132,8 @@ eval(extract_function("{$src}/awg_client.inc", 'awg_client_parse_addresses'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_post'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_addresses_to_line'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_format_endpoint'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_store'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_dialin_endpoint'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_normalize_dyndns_host'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_hostnames_from_updateurl'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_config_entries'));
@@ -435,6 +446,34 @@ check('y no se le agregan corchetes dos veces',
 check('sin host no hay endpoint', awg_client_format_endpoint('', '51820') === '');
 check('sin puerto queda el host solo',
 	awg_client_format_endpoint('vpn.example.com', '') === 'vpn.example.com');
+
+/*
+ * Lo que se muestra en las listas es a donde DISCA el cliente, que es lo que
+ * se cargo al crear el peer. De donde llego el cliente es otra cosa: la aprende
+ * el servidor del handshake y cambia en cada reconexion. Mostrar la segunda
+ * bajo el titulo de la primera hace parecer que el puerto configurado se
+ * perdio, que es exactamente lo que paso el 14-08-2026.
+ */
+$peer_cli = array('descr' => 'telefono',
+	$awgg['client_store'] => array('endpoint' => 'vpn.example.com', 'port' => '51822'));
+
+check('la lista muestra a donde disca el cliente',
+	awg_client_dialin_endpoint($peer_cli) === 'vpn.example.com:51822',
+	var_export(awg_client_dialin_endpoint($peer_cli), true));
+
+check('con el puerto que se configuro, no el que use el cliente',
+	strpos(awg_client_dialin_endpoint($peer_cli), ':51822') !== false);
+
+$peer_cli[$awgg['client_store']]['endpoint'] = 'fd00::1';
+
+check('y una IPv6 sigue yendo entre corchetes',
+	awg_client_dialin_endpoint($peer_cli) === '[fd00::1]:51822');
+
+check('un peer sin cliente no tiene direccion de discado',
+	awg_client_dialin_endpoint(array('descr' => 'site-to-site')) === null);
+
+check('ni uno cuyo cliente no guardo endpoint',
+	awg_client_dialin_endpoint(array($awgg['client_store'] => array('port' => '51822'))) === null);
 
 printf("\n-- DNS dinamico --\n\n");
 

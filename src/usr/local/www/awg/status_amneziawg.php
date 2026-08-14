@@ -35,6 +35,7 @@ require_once('util.inc');
 // AmneziaWG includes
 require_once('amneziawg/includes/awg.inc');
 require_once('amneziawg/includes/awg_guiconfig.inc');
+require_once('amneziawg/includes/awg_client.inc');
 
 global $awgg;
 
@@ -138,6 +139,7 @@ if (!empty($a_devices)):
 								<th><?=gettext('Latest Handshake')?></th>
 								<th><?=gettext('Public Key')?></th>
 								<th><?=gettext('Endpoint')?></th>
+								<th><?=gettext('Connected from')?></th>
 								<th><?=gettext('Allowed IPs')?></th>
 								<th><?=gettext('RX')?></th>
 								<th><?=gettext('TX')?></th>
@@ -156,7 +158,20 @@ if (!empty($a_devices)):
 									<td title="<?=htmlspecialchars($peer['public_key'])?>">
 										<?=htmlspecialchars(awg_truncate_pretty($peer['public_key'], 16))?>
 									</td>
-									<td><?=htmlspecialchars($peer['endpoint'])?></td>
+<?php
+					/*
+					 * Endpoint es a donde disca el cliente: lo que se cargo al
+					 * crear el peer y lo que dice su archivo. "Connected from"
+					 * es de donde llego, que lo aprende el servidor del
+					 * handshake y cambia en cada reconexion. Mostrar el segundo
+					 * bajo el titulo del primero -- que es lo que hace la
+					 * pagina nativa -- hace parecer que el puerto configurado
+					 * se perdio.
+					 */
+					$dialin = awg_client_dialin_endpoint($peer['config']);
+?>
+									<td><?=htmlspecialchars($dialin ?? awg_format_endpoint(false, $peer['config']))?></td>
+									<td><?=htmlspecialchars(empty($peer['endpoint']) ? gettext('not connected') : $peer['endpoint'])?></td>
 									<td><?=awg_generate_peer_allowedips_popup_link(awg_peer_get_array_idx($peer['config']['publickey'], $peer['config']['tun']))?></td>
 									<td><?=htmlspecialchars(format_bytes($peer['transfer_rx']))?></td>
 									<td><?=htmlspecialchars(format_bytes($peer['transfer_tx']))?></td>
@@ -166,7 +181,7 @@ if (!empty($a_devices)):
 		else:
 ?>
 								<tr>
-									<td colspan="7"><?=gettext('No peers have been configured')?></td>
+									<td colspan="8"><?=gettext('No peers have been configured')?></td>
 								</tr>
 <?php		
 		endif;
