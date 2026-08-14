@@ -1607,6 +1607,24 @@ function awg_client_qrcode_js_url() {
  * descripcion escrita por una persona -- da un archivo que el cliente rechaza
  * al importar.
  */
+/*
+ * El nombre del archivo del cliente.
+ *
+ * Los dos numeros raros de aca --el juego de caracteres y el corte en 15-- no
+ * son gusto: son literalmente la regla de awg-quick, que deriva el nombre de la
+ * INTERFAZ del nombre del archivo. En wg-quick/linux.bash:
+ *
+ *   [[ $CONFIG_FILE =~ (^|/)([a-zA-Z0-9_=+.-]{1,15})\.conf$ ]] ||
+ *       die "The config file must be a valid interface name, followed by .conf"
+ *
+ * O sea que un peer llamado "Telefono Marcelo" tiene que viajar como
+ * Telefono-Marcel.conf: con la "o" final, un usuario de Linux corre
+ * "awg-quick up" y le muere ahi, sin que el nombre tenga nada de malo a la
+ * vista. Las apps de Android, iOS y Windows no tienen ese limite y solo usan el
+ * nombre para mostrar, asi que el corte les queda feo pero no les molesta.
+ *
+ * Parece un bug --a mi me lo parecio-- y por eso esta escrito.
+ */
 function awg_client_conf_filename($descr, $fallback = 'awgclient') {
 	$name = preg_replace('/[^a-zA-Z0-9_=+.-]/', '-', (string) $descr);
 	$name = preg_replace('/-+/', '-', $name);
