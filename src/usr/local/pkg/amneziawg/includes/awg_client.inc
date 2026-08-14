@@ -1361,6 +1361,26 @@ function awg_client_do_peer_post($post) {
 }
 
 /*
+ * La URL de la primera libreria de QR disponible, o null.
+ *
+ * Lleva la fecha del archivo como parametro para que un navegador no sirva una
+ * version vieja despues de actualizar el paquete.
+ */
+function awg_client_qrcode_js_url() {
+	global $awgg;
+
+	foreach ($awgg['qrcode_js'] as $url) {
+		$path = "{$awgg['www_root']}{$url}";
+
+		if (file_exists($path)) {
+			return "{$url}?v=" . filemtime($path);
+		}
+	}
+
+	return null;
+}
+
+/*
  * Nombre de archivo para el .conf de un cliente.
  *
  * El nombre de la interfaz que arma el cliente sale del nombre del archivo, y

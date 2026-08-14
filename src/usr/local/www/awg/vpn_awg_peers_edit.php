@@ -83,8 +83,17 @@ if ($_POST) {
 					}
 				}
 
-				// Save was successful
-				header('Location: /awg/vpn_awg_peers.php');
+				/*
+				 * Guardar un peer con cliente vuelve a su propia pagina y no a
+				 * la lista: ahi abajo esta el QR y el archivo recien generado,
+				 * que es lo que se vino a buscar. Un peer sin cliente no tiene
+				 * nada mas que mostrar, asi que ese sale a la lista.
+				 */
+				if (!is_null($res['peer_idx']) && ($pconfig['client_enable'] == 'yes')) {
+					header("Location: /awg/vpn_awg_peers_edit.php?peer={$res['peer_idx']}");
+				} else {
+					header('Location: /awg/vpn_awg_peers.php');
+				}
 			}
 
 			break;
@@ -547,15 +556,6 @@ $section->addInput(new Form_Checkbox(
 	$pconfig['applynow'] == 'yes'
 ))->setHelp('<span class="text-danger">Note: </span>This action may momentarily suspend active AmneziaWG peer connections on the changed tunnels.');
 
-if ($client_exportable) {
-	$section->addInput(new Form_StaticText(
-		gettext('Download'),
-		'<button type="submit" name="downloadconf" id="downloadconf" class="btn btn-primary btn-sm" ' .
-		'value="download" formnovalidate><i class="fa-solid fa-download icon-embed-btn"></i>' .
-		gettext('Download') . '</button>'
-	))->setHelp('Downloads the .conf as it is saved right now, not as it is shown above. Save first to include any change.');
-}
-
 $form->add($section);
 
 $form->addGlobal(new Form_Input(
@@ -567,7 +567,73 @@ $form->addGlobal(new Form_Input(
 
 print($form);
 
+/*
+ * El archivo del cliente, para llevarselo.
+ *
+ * Va en la pagina de edicion y no en un panel que aparece una sola vez despues
+ * de guardar: asi se puede volver por el QR cuando haga falta -- que es lo
+ * normal, el telefono no siempre esta a mano en el momento de crear el peer --
+ * sin tener que re-clavear al cliente.
+ *
+ * Ojo: el .conf va adentro del HTML, con la clave privada. Es el mismo limite
+ * de confianza que la descarga, pero conviene tenerlo presente.
+ */
+$client_conf = $client_exportable ? awg_client_conf_from_peer($peer_idx) : false;
+
+if ($client_conf !== false):
+	$qrcode_js = awg_client_qrcode_js_url();
 ?>
+
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?=gettext('Client File')?></h2></div>
+	<div class="panel-body">
+		<div class="row">
+			<div class="col-sm-7">
+				<textarea id="awg_conf" class="form-control" rows="14" readonly="readonly" spellcheck="false"><?=htmlspecialchars($client_conf)?></textarea>
+				<br />
+				<!--
+					Formulario propio: este panel se dibuja despues de print($form),
+					o sea fuera del formulario principal, y un submit suelto no
+					mandaria nada.
+				-->
+				<form action="/awg/vpn_awg_peers_edit.php" method="post" style="display: inline;">
+					<input type="hidden" name="index" value="<?=htmlspecialchars((string) $peer_idx)?>" />
+					<input type="hidden" name="downloadconf" value="download" />
+					<button type="submit" id="downloadconf" class="btn btn-primary btn-sm">
+						<i class="fa-solid fa-download icon-embed-btn"></i>
+						<?=gettext('Download')?>
+					</button>
+				</form>
+				<button type="button" id="awg_copy" class="btn btn-default btn-sm" data-success-text="<?=gettext('Copied')?>" data-timeout="3000">
+					<i class="fa-solid fa-clipboard icon-embed-btn"></i>
+					<span id="awg_copy_label"><?=gettext('Copy')?></span>
+				</button>
+				<a id="awg_qrdownload" href="#" class="btn btn-default btn-sm" style="display: none;">
+					<i class="fa-solid fa-qrcode icon-embed-btn"></i>
+					<?=gettext('Download QR')?>
+				</a>
+				<div id="awg_qr_hidden" style="display: none;"></div>
+				<span class="help-block"><?=gettext('This is what is saved right now, not what the form above shows. Save first to include any change.')?></span>
+			</div>
+			<div class="col-sm-5 text-center">
+				<div id="awg_qr"></div>
+<?php if (is_null($qrcode_js)): ?>
+				<div class="alert alert-warning" role="alert">
+					<?=gettext('The QR code library was not found. Copy a qrcode.js build to /usr/local/www/awg/js/awg_qrcode.js.')?>
+				</div>
+<?php else: ?>
+				<span class="help-block"><?=gettext('Scan with the AmneziaWG app on Android or iOS.')?></span>
+<?php endif; ?>
+			</div>
+		</div>
+	</div>
+</div>
+
+<?php if (!is_null($qrcode_js)): ?>
+<script src="<?=htmlspecialchars($qrcode_js)?>"></script>
+<?php endif; ?>
+
+<?php endif; ?>
 
 <nav class="action-buttons">
 	<button type="submit" id="saveform" name="saveform" class="btn btn-primary btn-sm" value="save" title="<?=gettext('Save Peer')?>">
@@ -583,12 +649,19 @@ $genkeyswarning = gettext("Overwrite the client key pair? The client configurati
 // Lo que cada tunel puede contestar por si mismo, para no volver al servidor
 // cada vez que se cambia la seleccion.
 $tunnel_hints = awg_client_tunnel_hints();
+
+/*
+ * Escapado para todo lo que se emite adentro de un <script>. Sin esto, una
+ * descripcion de tunel o de alias con un '</script>' adentro cerraria el bloque
+ * y lo que siguiera se ejecutaria como HTML.
+ */
+$jsflags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
 ?>
 
 <script type="text/javascript">
 //<![CDATA[
 events.push(function() {
-	var awgHints = <?=json_encode($tunnel_hints)?>;
+	var awgHints = <?=json_encode($tunnel_hints, $jsflags)?>;
 
 	awgRegTrimHandler();
 
@@ -620,7 +693,7 @@ events.push(function() {
 	$('#nextaddr').prop('type', 'button');
 
 	$('#genpsk').click(function(event) {
-		if ($('#presharedkey').val().length == 0 || confirm(<?=json_encode($genkeywarning)?>)) {
+		if ($('#presharedkey').val().length == 0 || confirm(<?=json_encode($genkeywarning, $jsflags)?>)) {
 			$.ajax({
 				url: "/awg/vpn_awg_peers_edit.php",
 				type: "post",
@@ -633,7 +706,7 @@ events.push(function() {
 	});
 
 	$('#genkeys').click(function(event) {
-		if ($('#privatekey').val().length == 0 || confirm(<?=json_encode($genkeyswarning)?>)) {
+		if ($('#privatekey').val().length == 0 || confirm(<?=json_encode($genkeyswarning, $jsflags)?>)) {
 			$.ajax({
 				url: "/awg/vpn_awg_peers_edit.php",
 				type: "post",
@@ -678,7 +751,7 @@ events.push(function() {
 	 * Un alias AGREGA sus redes a lo que ya haya, sin repetir: la lista se arma
 	 * juntando varios, y pisarla obligaria a elegir uno solo.
 	 */
-	var awgAliases = <?=json_encode($alias_networks)?>;
+	var awgAliases = <?=json_encode($alias_networks, $jsflags)?>;
 
 	function splitList(value) {
 		return String(value).split(',').map(function(s) {
@@ -778,6 +851,166 @@ events.push(function() {
 	$('#saveform').click(function () {
 		$(form).submit();
 	});
+
+<?php if (($client_conf !== false) && !is_null($qrcode_js)): ?>
+	var awgQrSize = <?=(int) $awgg['qr_size']?>;
+	var awgQrDisplaySize = <?=(int) $awgg['qr_display_size']?>;
+	var awgQrQuietZone = <?=(int) $awgg['qr_quiet_zone']?>;
+	var awgQrLevel = <?=json_encode($awgg['qr_level'], $jsflags)?>;
+	var awgConfName = <?=json_encode(awg_client_conf_filename($pconfig['descr']), $jsflags)?>;
+
+	/*
+	 * Arregla tres cosas que la libreria deja mal en el <svg> que arma:
+	 *
+	 *  - usa width="100%" height="100%" e ignora el tamano que se le pidio, asi
+	 *    que adentro de un contenedor sin altura el codigo colapsa a nada
+	 *  - no deja zona tranquila, y el estandar pide cuatro modulos vacios de
+	 *    cada lado para que un lector encuentre el codigo
+	 *  - omite el xmlns, con lo cual una copia serializada no carga como imagen
+	 */
+	function awgFixQrSvg(holder, size) {
+		var svg = holder.querySelector('svg');
+
+		if (!svg) {
+			return null;
+		}
+
+		var box = (svg.getAttribute('viewBox') || '').split(/\s+/);
+		var modules = (box.length === 4) ? parseInt(box[2], 10) : 0;
+
+		if (modules > 0) {
+			var quiet = awgQrQuietZone;
+			var side = modules + (quiet * 2);
+
+			svg.setAttribute('viewBox', (-quiet) + ' ' + (-quiet) + ' ' + side + ' ' + side);
+
+			// El rect de fondo tiene que cubrir tambien el margen nuevo
+			for (var i = 0; i < svg.childNodes.length; i++) {
+				var node = svg.childNodes[i];
+
+				if (node.nodeName && (node.nodeName.toLowerCase() === 'rect')) {
+					node.setAttribute('x', -quiet);
+					node.setAttribute('y', -quiet);
+					node.setAttribute('width', side);
+					node.setAttribute('height', side);
+
+					break;
+				}
+			}
+		}
+
+		svg.setAttribute('width', size);
+		svg.setAttribute('height', size);
+
+		// Achicarse en pantallas angostas en vez de desbordar la columna
+		svg.setAttribute('style', 'max-width: 100%; height: auto;');
+
+		if (!svg.getAttribute('xmlns')) {
+			svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+		}
+
+		return svg;
+	}
+
+	function awgSvgDataUrl(svg) {
+		var text = new XMLSerializer().serializeToString(svg);
+
+		return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
+	}
+
+	function awgSave(dataUrl, filename) {
+		var link = document.createElement('a');
+
+		link.href = dataUrl;
+		link.download = filename;
+
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+	}
+
+	// El QR que se ve
+	new QRCode(document.getElementById('awg_qr'), {
+		text: $('#awg_conf').val(),
+		width: awgQrDisplaySize,
+		height: awgQrDisplaySize,
+		correctLevel: QRCode.CorrectLevel[awgQrLevel]
+	});
+
+	awgFixQrSvg(document.getElementById('awg_qr'), awgQrDisplaySize);
+
+	$('#awg_qrdownload').show().click(function(event) {
+		event.preventDefault();
+
+		/*
+		 * Un SVG pelado se reescala a toda la ventana al abrirlo, asi que el QR
+		 * se rasteriza a un PNG de tamano fijo. El SVG queda de respaldo para
+		 * los navegadores que se nieguen a dibujarlo en un canvas.
+		 */
+		var holder = document.getElementById('awg_qr_hidden');
+
+		holder.innerHTML = '';
+
+		new QRCode(holder, {
+			text: $('#awg_conf').val(),
+			width: awgQrSize,
+			height: awgQrSize,
+			correctLevel: QRCode.CorrectLevel[awgQrLevel]
+		});
+
+		var svg = awgFixQrSvg(holder, awgQrSize);
+
+		if (!svg) {
+			return;
+		}
+
+		var svgUrl = awgSvgDataUrl(svg);
+		var img = new Image();
+
+		img.onload = function() {
+			try {
+				var canvas = document.createElement('canvas');
+
+				canvas.width = awgQrSize;
+				canvas.height = awgQrSize;
+
+				var ctx = canvas.getContext('2d');
+
+				// Fondo blanco, para que el codigo se lea en visores oscuros
+				ctx.fillStyle = '#ffffff';
+				ctx.fillRect(0, 0, awgQrSize, awgQrSize);
+				ctx.drawImage(img, 0, 0, awgQrSize, awgQrSize);
+
+				awgSave(canvas.toDataURL('image/png'), awgConfName + '.png');
+			} catch (e) {
+				awgSave(svgUrl, awgConfName + '.svg');
+			}
+
+			holder.innerHTML = '';
+		};
+
+		img.onerror = function() {
+			awgSave(svgUrl, awgConfName + '.svg');
+
+			holder.innerHTML = '';
+		};
+
+		img.src = svgUrl;
+	});
+
+	$('#awg_copy').click(function() {
+		var $label = $('#awg_copy_label');
+		var original = $label.text();
+
+		navigator.clipboard.writeText($('#awg_conf').val());
+
+		$label.text($(this).attr('data-success-text'));
+
+		setTimeout(function() {
+			$label.text(original);
+		}, $(this).attr('data-timeout'));
+	});
+<?php endif; ?>
 });
 //]]>
 </script>

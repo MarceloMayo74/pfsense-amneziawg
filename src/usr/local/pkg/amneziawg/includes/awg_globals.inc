@@ -164,6 +164,29 @@ $awgg = array(
 	'default_keepalive'			=> 25,
 
 	/*
+	 * La libreria de QR. Se busca en orden y se usa la primera que exista, asi
+	 * una instalacion que ya tenga la de wgeasy no arrastra una segunda copia
+	 * de 35 KB del mismo codigo.
+	 */
+	'www_root'				=> '/usr/local/www',
+	'qrcode_js'				=> array(
+							'/awg/js/awg_qrcode.js',
+							'/wgeasy/js/wgeasy_qrcode.js'),
+
+	/*
+	 * El QR se dibuja a 400 px y se descarga a 512. Nivel de correccion 'L'
+	 * porque el .conf de AmneziaWG es largo -- lleva 16 parametros mas que uno
+	 * de WireGuard-- y mas correccion significa mas modulos, o sea un codigo
+	 * mas denso y mas dificil de leer con la camara. Los 4 modulos de zona
+	 * tranquila los pide el estandar; sin ellos hay lectores que no encuentran
+	 * el codigo.
+	 */
+	'qr_display_size'			=> 400,
+	'qr_size'				=> 512,
+	'qr_level'				=> 'L',
+	'qr_quiet_zone'				=> 4,
+
+	/*
 	 * Watchdog. Cada cuantos minutos corre el cron, y cuanto espera antes de
 	 * reintentar un tunel que no arranca.
 	 *
