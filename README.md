@@ -15,6 +15,32 @@ firma.
 > caudal sobre el hardware objetivo está medido: ~830 Mbps, y ofuscar no cuesta
 > rendimiento.
 
+## Cómo se ve
+
+Los túneles, con su estado y sus peers:
+
+![Túneles](docs/img/tunnels.png)
+
+La sección **Obfuscation**, que es lo que este paquete tiene y ningún otro: el
+selector de compatibilidad y los parámetros, todos sorteados por túnel.
+
+![Ofuscación](docs/img/obfuscation.png)
+
+La lista de peers, con descargar, QR y mail al lado de editar:
+
+![Peers](docs/img/peers-list.png)
+
+El archivo del cliente vive en la página del peer que lo tiene, con su QR para
+escanear desde la app:
+
+![Configuración del cliente](docs/img/peer-client.png)
+
+El estado de los túneles y el widget del dashboard:
+
+![Estado](docs/img/status.png)
+
+![Widget](docs/img/widget.png)
+
 ## Estado por fase
 
 | Fase | | Estado |
