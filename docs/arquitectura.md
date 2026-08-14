@@ -395,13 +395,50 @@ las referencias tiene y la que hace usable el modo servidor.
 
 ## 11. Riesgos abiertos
 
-- **Performance real de `amneziawg-go`** en el hardware objetivo. Sigue sin
-  medirse: la fase 1 validó latencia (0,054 ms por loopback) pero no
-  throughput, que necesita un enlace real. Medirlo antes de la fase 6.
 - **Estabilidad de los procesos go a largo plazo.** El watchdog de la fase 5
   existe justamente porque el plugin de OPNsense consideró necesario tenerlo.
 - **Duplicación de mantenimiento con wgeasy.** Dos árboles de código con mucha
   lógica común. Evaluar en la fase 6 si conviene extraer lo compartido.
+
+### Resuelto: el throughput
+
+Medido el 14-08-2026 con `spike/throughput.sh` sobre el firewall de
+2.9.0-BETA (i5-3570, 4 núcleos). El detalle entero, incluido el porqué de cada
+decisión del método, está en [medicion-throughput.md](medicion-throughput.md).
+Mediana de 3 ventanas de 10 s; el caudal es payload puro.
+
+| escenario | Mbps | pps | cores | Mbps/core |
+|---|---|---|---|---|
+| `wg-kernel` (`if_wg`) | 1483 | 133 155 | 2,38 | 623 |
+| `awg-plano` | 828 | 74 310 | 3,40 | 243 |
+| `awg-ofuscado` | 835 | 74 985 | 3,41 | 245 |
+
+Tres cosas quedan establecidas:
+
+**El caudal alcanza de sobra.** Esos ~830 Mbps son pagando cifrar *y* descifrar
+en la misma caja. Un pfSense contra clientes remotos paga una sola mitad por
+paquete: cifrar costó 1,72 cores y descifrar 1,42, o sea ~480 Mbps por core de
+cifrado. El techo de paquetes por segundo es ~75 000, y con tráfico de paquetes
+chicos ese límite pega antes que el de Mbps.
+
+**La ofuscación no cuesta caudal**: 835 contra 828 Mbps y la misma CPU al
+decimal. Cierra con el diseño de AmneziaWG 1.x —`Jc`/`Jmin`/`Jmax` son paquetes
+basura *previos* al handshake y `S1`/`S2` es relleno *del* handshake; los datos
+van como WireGuard común con otro valor de tipo (`H4`)—. Se paga en el
+handshake, no en el tráfico. Importa para la fase 6: los parámetros que se
+generen para un cliente no tienen costo de rendimiento.
+
+**Userspace cuesta 2,5x por core** (623 contra 244 Mbps/core). Es el precio de
+la decisión de la sección 2 de no usar el módulo de kernel, y ahora está
+cuantificado.
+
+Lo que hay que recordar del método, porque el montaje obvio no mide nada: **dos
+túneles en la misma caja no se hablan por el túnel**. Con una sola tabla de
+ruteo la dirección del otro extremo es local y el kernel manda todo por `lo0`.
+Conviene releer con esto en la mano la fase 5 de `spike/fase1-bringup.sh`: aquel
+ping entre `10.253.253.1` y `.2` probablemente nunca pasó por el túnel. No
+invalida la fase 1 —lo que prueba que la criptografía anda es el handshake, no
+el ping— pero ningún harness futuro debería volver a apoyarse en ese camino.
 
 ### Resueltos en la fase 1
 

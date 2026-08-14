@@ -10,7 +10,9 @@ firma.
 
 > **Estado: fase 5 terminada.** El paquete instala, tiene los 16 campos de
 > ofuscación, levanta y baja túneles desde la GUI supervisando un proceso
-> `amneziawg-go` por túnel, y tiene watchdog para los que se caen solos.
+> `amneziawg-go` por túnel, y tiene watchdog para los que se caen solos. El
+> caudal sobre el hardware objetivo está medido: ~830 Mbps, y ofuscar no cuesta
+> rendimiento.
 
 ## Estado por fase
 
@@ -65,6 +67,28 @@ es lo que **no** hace: no toca un túnel que vos deshabilitaste ni arranca nada
 con el servicio parado. Un túnel que no logra arrancar se reintenta cada vez
 más espaciado, hasta una hora, y se olvida en cuanto levanta.
 
+## ¿Cuánto rinde?
+
+Medido sobre el hardware objetivo el 14-08-2026 —un i5-3570 de 4 núcleos— con
+`spike/throughput.sh`. Mediana de 3 ventanas de 10 s, caudal de payload puro:
+
+| | Mbps | pps | cores | Mbps/core |
+|---|---|---|---|---|
+| WireGuard en el kernel | 1483 | 133 155 | 2,38 | 623 |
+| AmneziaWG sin ofuscar | 828 | 74 310 | 3,40 | 243 |
+| AmneziaWG ofuscado | 835 | 74 985 | 3,41 | 245 |
+
+**Alcanza de sobra**: esos ~830 Mbps son pagando cifrar *y* descifrar en la
+misma caja, y un firewall contra clientes remotos paga una sola mitad por
+paquete. **La ofuscación es gratis** en caudal —835 contra 828 Mbps es ruido—
+porque en AmneziaWG 1.x los paquetes basura y el relleno van en el handshake,
+no en los datos. Lo que sí se paga es estar en userspace: 2,5x por core contra
+el kernel, que es el precio conocido de que el módulo `if_amn.ko` no cargue en
+pfSense.
+
+El detalle, y por qué medir esto tiene tres trampas que solo se ven midiendo,
+está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
+
 ### Herramientas de verificación
 
 ```sh
@@ -81,9 +105,6 @@ firewall de verdad. Ver la fase 5 en `docs/arquitectura.md`.
 **Fase 6: integración con wgeasy.** Generación de configs de cliente con QR,
 zip y mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de
 las referencias tiene y la que hace usable el modo servidor.
-
-Antes de eso conviene medir el throughput real de `amneziawg-go` en el hardware
-objetivo, que sigue pendiente desde la fase 1: se validó latencia, no caudal.
 
 ## Por dónde empezar
 
