@@ -176,6 +176,107 @@ function awg_validate_tunnel_post($pconfig, $idx_from_post) {
  * cualquier otra cosa del tunel. Que no llegue a ningun .conf ya lo garantiza
  * awg_obfuscation_pairs(), que es donde importa.
  */
+/*
+ * Valida la plantilla de un I1-I5. Devuelve '' si esta bien, o el motivo.
+ *
+ * Es una cadena de etiquetas <clave valor> pegadas. Las reglas salen de
+ * newObfChain() y de los builders de device/obf.go, no de la documentacion:
+ *
+ *   <b hex>          hex con o sin 0x, no vacio, de largo par
+ *   <t>              sin argumento
+ *   <r N> <rc N>     N entero
+ *   <rd N> <dz N>
+ *   <d> <ds>         sin argumento; no sirven en un I --se generan sin datos de
+ *                    origen-- pero el backend los acepta y no somos nosotros
+ *                    quienes vamos a rechazar una config que alla funciona
+ *
+ * En dos cosas somos MAS estrictos que el backend, las dos a proposito:
+ *
+ *   - N negativo. strconv.Atoi lo acepta y el largo negativo termina en un
+ *     slice invalido adentro del proceso go. Que el .conf entre y el daemon se
+ *     caiga despues es peor que un error al guardar.
+ *   - N gigante. Nada lo limita del otro lado, pero el I es un paquete UDP: un
+ *     <r 100000> no se puede mandar. El tope de 1000 es el que publica Amnezia.
+ *
+ * Y el texto suelto fuera de las etiquetas, que el backend IGNORA en silencio,
+ * aca se rechaza: es la unica forma de que lo que se ve en la pantalla sea lo
+ * que viaja por el cable.
+ */
+function awg_validate_junk_payload($value) {
+	$known = array('b', 't', 'r', 'rc', 'rd', 'd', 'ds', 'dz');
+	$needs_number = array('r', 'rc', 'rd', 'dz');
+
+	$rest = $value;
+	$tags = 0;
+
+	while ($rest !== '') {
+		$start = strpos($rest, '<');
+
+		if ($start === false) {
+			break;
+		}
+
+		if (trim(substr($rest, 0, $start)) !== '') {
+			return gettext('everything has to be inside <...> tags; the backend silently drops the rest.');
+		}
+
+		$end = strpos($rest, '>', $start);
+
+		if ($end === false) {
+			return gettext('there is a < without its closing >.');
+		}
+
+		$parts = preg_split('/\s+/', trim(substr($rest, $start + 1, $end - $start - 1)), -1, PREG_SPLIT_NO_EMPTY);
+		$rest = substr($rest, $end + 1);
+		$tags++;
+
+		if (empty($parts)) {
+			return gettext('there is an empty <> tag.');
+		}
+
+		$tag = $parts[0];
+		$arg = $parts[1] ?? '';
+
+		if (!in_array($tag, $known, true)) {
+			return sprintf(gettext('<%s> is not a tag the backend knows.'), $tag);
+		}
+
+		if ($tag === 'b') {
+			$hex = (stripos($arg, '0x') === 0) ? substr($arg, 2) : $arg;
+
+			if ($hex === '') {
+				return gettext('<b> needs its bytes, as hex.');
+			}
+
+			if ((strlen($hex) % 2) !== 0) {
+				return gettext('<b> needs an even number of hex digits: they are bytes.');
+			}
+
+			if (!ctype_xdigit($hex)) {
+				return gettext('<b> takes hex digits only.');
+			}
+		} else if (in_array($tag, $needs_number, true)) {
+			if (!ctype_digit($arg)) {
+				return sprintf(gettext('<%s> needs a length, as a whole number.'), $tag);
+			}
+
+			if ((int) $arg > 1000) {
+				return sprintf(gettext('<%s> is limited to 1000: the whole thing has to fit in one UDP packet.'), $tag);
+			}
+		}
+	}
+
+	if (trim($rest) !== '') {
+		return gettext('everything has to be inside <...> tags; the backend silently drops the rest.');
+	}
+
+	if ($tags === 0) {
+		return gettext('this has no tags, so nothing would be sent. Leave it empty instead.');
+	}
+
+	return '';
+}
+
 function awg_validate_obfuscation($pconfig) {
 	global $awgg;
 
@@ -252,6 +353,14 @@ function awg_validate_obfuscation($pconfig) {
 					$input_errors[] = sprintf(
 						gettext('%1$s must be between %2$s and %3$s. Values below %2$s are the standard WireGuard message types, which any header left empty still uses.'),
 						$label, $spec['min'], $spec['max']);
+				}
+				break;
+
+			case 'text':
+				$why = awg_validate_junk_payload($value);
+
+				if ($why !== '') {
+					$input_errors[] = sprintf('%1$s: %2$s', $label, $why);
 				}
 				break;
 		}

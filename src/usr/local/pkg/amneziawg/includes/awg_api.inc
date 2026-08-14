@@ -858,6 +858,115 @@ function awg_gen_headers() {
 }
 
 /*
+ * Sortea el juego entero de parametros de ofuscacion de un tunel.
+ *
+ * Por que sortear y no traer valores por defecto: un paquete que se instala en
+ * muchos lados con las mismas constantes hace que todas esas instalaciones
+ * emitan los mismos bytes, y eso es una firma -- justo lo que el paquete existe
+ * para no dejar. Da igual que la constante sea buena: lo que se reconoce no es
+ * el valor sino que se repita. Vale para Jc/Jmin/Jmax/S1/S2 igual que para los
+ * headers, que ya se sorteaban.
+ *
+ * Los rangos son estrechos a proposito, no todo lo que el campo admite:
+ *
+ *   Jc     3-8      cada junk es un paquete mas en cada handshake
+ *   Jmin   40-96    lo bastante grande para no parecer un paquete de control
+ *   Jmax   Jmin+24 a Jmin+96, siempre mayor que Jmin
+ *   S1/S2  15-64    relleno del handshake, gratis en caudal
+ *   S3     15-64    idem, es el cookie reply
+ *   S4     0        el unico que se paga por paquete de datos y come MTU
+ *
+ * S4 queda en cero a proposito y esto no es pereza: en send.go el relleno de S4
+ * entra en el camino de datos, asi que se paga en cada paquete. Ver
+ * docs/amneziawg-2.0.md. Prenderlo tiene que ser una decision, no un default.
+ */
+function awg_gen_obfuscation($version = 1) {
+	$jmin = random_int(40, 96);
+
+	$gen = array(
+		'jc'	=> (string) random_int(3, 8),
+		'jmin'	=> (string) $jmin,
+		'jmax'	=> (string) ($jmin + random_int(24, 96)),
+		's1'	=> (string) random_int(15, 64),
+		's2'	=> (string) random_int(15, 64));
+
+	/*
+	 * Que S1 + 148 no de lo mismo que S2 + 92, o sea que un init y un response
+	 * no midan igual en el cable.
+	 *
+	 * Contra ESTE backend no hace falta: DeterminePacketTypeAndPadding() prueba
+	 * los tipos en orden y desempata por el header --que ya validamos que no se
+	 * solapen-- asi que dos tamanos iguales se distinguen igual. Se evita
+	 * porque no cuesta nada, porque el otro extremo puede ser otra
+	 * implementacion, y porque un tunel que no levanta por esto no da ningun
+	 * error que lo diga.
+	 */
+	if (((int) $gen['s1'] + 148) === ((int) $gen['s2'] + 92)) {
+		$gen['s2'] = (string) ((int) $gen['s2'] + 1);
+	}
+
+	if ($version >= 2) {
+		$gen['s3'] = (string) random_int(15, 64);
+		$gen['s4'] = '0';
+	}
+
+	foreach (awg_gen_headers() as $header => $value) {
+		$gen[$header] = (string) $value;
+	}
+
+	return $gen;
+}
+
+/*
+ * Sortea una plantilla para un I1-I5: un paquete basura con contenido elegido,
+ * de los que se mandan antes de la iniciacion del handshake.
+ *
+ * La gramatica esta leida de device/obf.go de amneziawg-go y verificada contra
+ * el binario; el detalle esta en docs/amneziawg-2.0.md. Se usan solo las cuatro
+ * etiquetas que tienen sentido aca: los I se generan con Obfuscate(buf, nil),
+ * sin datos de origen, asi que <d>, <ds> y <dz> parsean pero no significan nada.
+ *
+ * Cada plantilla arranca con bytes literales sorteados, que es lo que le da al
+ * paquete una forma propia --el lugar donde un protocolo de verdad pondria su
+ * cabecera-- y sigue con una o tres etiquetas mas.
+ *
+ * NO existe una plantilla de fabrica ni la va a haber: un I fijo dentro del
+ * paquete significa que todas las instalaciones emiten los mismos bytes antes
+ * del handshake, que es una firma mejor que la que se quiso borrar. Por lo mismo
+ * no se copian los ejemplos de la documentacion de Amnezia: estan publicados.
+ */
+function awg_gen_junk_payload() {
+	// Entre 2 y 6 bytes literales, en hex, siempre distintos.
+	$parts = array(sprintf('<b 0x%s>', bin2hex(random_bytes(random_int(2, 6)))));
+
+	$has_timestamp = false;
+
+	for ($i = random_int(1, 3); $i > 0; $i--) {
+		/*
+		 * <t> una sola vez: son 4 bytes de reloj, y repetirlo no agrega
+		 * variedad, agrega un patron.
+		 */
+		switch (random_int(0, $has_timestamp ? 2 : 3)) {
+			case 0:
+				$parts[] = sprintf('<r %d>', random_int(8, 64));
+				break;
+			case 1:
+				$parts[] = sprintf('<rc %d>', random_int(4, 24));
+				break;
+			case 2:
+				$parts[] = sprintf('<rd %d>', random_int(2, 12));
+				break;
+			default:
+				$parts[] = '<t>';
+				$has_timestamp = true;
+				break;
+		}
+	}
+
+	return implode('', $parts);
+}
+
+/*
  * Los limites de un header, que puede ser un valor suelto o un rango 'lo-hi'.
  * Un valor suelto es el rango degenerado [n, n], que es como lo modela
  * UintRange en el backend.

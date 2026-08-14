@@ -93,7 +93,7 @@ está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
 ### Herramientas de verificación
 
 ```sh
-.tools\php\php.exe tools\test-obfuscation.php   # 46 tests de validación
+.tools\php\php.exe tools\test-obfuscation.php   # 77 tests de validación y sorteo
 .tools\php\php.exe tools\test-client-conf.php   # 89 tests del .conf del cliente
 .tools\php\php.exe tools\test-mail.php          # 61 tests del envío por mail
 sh tools/check-calls.sh                         # llamadas a funciones awg_* que no existen
@@ -105,20 +105,24 @@ Los dos últimos existen por bugs que llegaron a un firewall de verdad: uno borr
 un cron del sistema (fase 5 en `docs/arquitectura.md`) y el otro tiró un fatal
 al guardar un peer. `php -l` no ve ninguno de los dos.
 
-Y hay cuatro sondas que corren **sobre el firewall**, contra el paquete
+Y hay cinco sondas que corren **sobre el firewall**, contra el paquete
 instalado, porque hay cosas que solo se ven ahí:
 
 ```sh
-scp spike/verify-client-conf.php spike/verify-mail.php spike/verify-peer-save.php spike/verify-version.php admin@FIREWALL:/root/
+scp spike/verify-client-conf.php spike/verify-mail.php spike/verify-peer-save.php \
+    spike/verify-version.php spike/verify-autofill.php admin@FIREWALL:/root/
 ssh admin@FIREWALL 'php /root/verify-client-conf.php'   # el .conf contra awg(8)
 ssh admin@FIREWALL 'php /root/verify-mail.php'          # el mail contra PEAR Mail
 ssh admin@FIREWALL 'php /root/verify-peer-save.php'     # el alta de un peer entera
 ssh admin@FIREWALL 'php /root/verify-version.php'       # la sonda de version y el filtrado
+ssh admin@FIREWALL 'php /root/verify-autofill.php'      # lo sorteado contra un daemon vivo
 ```
 
 La del mail no manda ningún mensaje: el único envío que intenta va contra
-`127.0.0.1:1`, que rechaza la conexión. La última escribe `config.xml`, hace
-respaldo antes y restaura al salir.
+`127.0.0.1:1`, que rechaza la conexión. La de peers escribe `config.xml`, hace
+respaldo antes y restaura al salir. La del auto-relleno levanta un daemon de
+descarte en `tun9096` —hace falta uno vivo, porque el valor de un `I` lo parsea
+el proceso go y no `awg(8)`— y lo baja al terminar.
 
 ### La fase 6: las configs de cliente
 
@@ -254,17 +258,48 @@ siguen guardando a propósito —para no borrarle al usuario valores que no vio�
 que si el filtro viviera en la GUI, bajar un túnel de 2.0 a 1.x seguiría
 escribiendo su `S3` en los dos archivos mientras la pantalla dice 1.x.
 
-Verificado con 46 tests locales de validación, 89 del `.conf` del cliente y
+Verificado con 77 tests locales de validación, 89 del `.conf` del cliente y
 14 sobre el firewall (`spike/verify-version.php`), que incluyen el control
 negativo de la sonda y que los `.conf` de los dos niveles los parsee `awg(8)`.
 
+### Todo se sortea, y por qué eso no es un detalle
+
+Un túnel nuevo llega con **todos** los parámetros sorteados, no solo los
+headers: `Jc`, `Jmin`, `Jmax`, `S1`, `S2` y —si el nivel llega— `S3`. Antes eran
+constantes razonables, y el problema no era que fueran malas sino que **eran las
+mismas en todas las instalaciones**: lo que un DPI reconoce no es el valor sino
+que se repita. Un paquete que se instala en mil firewalls con `Jc = 4` y
+`S1 = 30` le está regalando una firma nueva a cambio de borrar la vieja.
+
+`S4` es la excepción y queda en **cero**: es el único parámetro que se paga por
+paquete de datos —el relleno entra en el camino de transporte, no en el
+handshake— y además come MTU. Prenderlo tiene que ser una decisión.
+
+Los `I1`–`I5` tienen su propio botón, porque son opcionales. Cada uno es una
+plantilla —`<b hex>` bytes literales, `<t>` un timestamp, `<r N>`/`<rc N>`/`<rd N>`
+esa cantidad de bytes, letras o dígitos al azar— y el generador arma una
+distinta cada vez, empezando siempre por bytes literales propios. **No hay
+plantilla de fábrica y no la va a haber**, por lo mismo de arriba; el ejemplo
+que publica la documentación de Amnezia es justamente el único que no se puede
+usar, porque está publicado.
+
+Esos campos ahora se validan: hasta acá eran texto libre, y un error de tipeo
+dejaba el túnel sin levantar sin decir nada. Las reglas salen de
+`newObfChain()` y sus constructores en `device/obf.go`, no de la documentación.
+En tres cosas somos **más estrictos que el backend**, a propósito: un largo
+negativo (que él acepta y después revienta el proceso), uno que no entra en un
+paquete UDP, y el texto suelto fuera de las etiquetas (que él ignora en
+silencio, así que lo que ves en la pantalla no sería lo que viaja).
+
+Verificado con 77 tests locales y 9 contra un daemon vivo en el firewall
+(`spike/verify-autofill.php`): que el backend acepte los 25 juegos y las 40
+plantillas sorteadas, y —la propiedad que importa— que nuestro validador
+**nunca apruebe algo que el backend rechace**.
+
 ### Próximo paso concreto
 
-**Auto-relleno sorteado por túnel** para los campos que hoy quedan vacíos. Es
-requisito de publicar: si el paquete trajera plantillas fijas, toda instalación
-emitiría los mismos bytes, y eso es una firma peor que no ofuscar. La gramática
-de los `I1`–`I5` está documentada en `docs/amneziawg-2.0.md`; el ejemplo que
-publica Amnezia es justamente lo único que no hay que copiar.
+Publicar. Falta elegir el número de versión del primer release y adjuntarle la
+fuente del `awg` (ver [docs/licencias.md](docs/licencias.md)).
 
 ## Por dónde empezar
 

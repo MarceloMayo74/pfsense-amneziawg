@@ -279,9 +279,13 @@ $awgg = array(
 	'header_mask'		=> '/^\d{1,10}(-\d{1,10})?$/',
 
 	/*
-	 * Defaults de los paquetes basura y el relleno. H1-H4 no tienen default:
-	 * se sortean al crear el tunel, porque headers fijos serian una firma
-	 * nueva y justamente lo que se busca es no tener ninguna.
+	 * Valores de referencia, y nada mas que eso: se muestran como placeholder
+	 * del campo vacio para dar una idea del orden de magnitud.
+	 *
+	 * **No son defaults.** Un tunel nuevo llega con todo sorteado por
+	 * awg_gen_obfuscation(), porque un paquete que se instala en muchos lados
+	 * con las mismas constantes hace que todas esas instalaciones emitan los
+	 * mismos bytes, y eso es una firma -- lo mismo que ya valia para H1-H4.
 	 */
 	'default_jc'		=> 4,
 	'default_jmin'		=> 40,

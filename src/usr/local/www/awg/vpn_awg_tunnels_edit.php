@@ -101,6 +101,33 @@ if ($_POST) {
 				exit;
 				break;
 
+			/*
+			 * El sorteo de los parametros de ofuscacion, por ajax, para que el
+			 * boton no pierda lo demas que el usuario ya escribio en la pagina.
+			 *
+			 * El nivel lo manda el selector, pero no se le cree: se topea con
+			 * awg_version_ceiling() igual que todo lo demas, o un POST armado a
+			 * mano se llevaria campos que este firewall no puede escribir.
+			 */
+			case 'genobf':
+				$level = min((int) ($_POST['awgversion'] ?? 1),
+					     awg_version_ceiling());
+
+				print(json_encode(awg_gen_obfuscation($level)));
+				exit;
+				break;
+
+			case 'genjunk':
+				$payloads = array();
+
+				foreach (array('i1', 'i2', 'i3', 'i4', 'i5') as $payload) {
+					$payloads[$payload] = awg_gen_junk_payload();
+				}
+
+				print(json_encode($payloads));
+				exit;
+				break;
+
 			default:
 				// Shouldn't be here, so bail out.
 				header('Location: /awg/vpn_awg_tunnels.php');
@@ -158,18 +185,15 @@ if (is_numericint($tun_idx) && is_array(config_get_path("installedpackages/amnez
 	 * que no valido, $pconfig ya trae lo que el usuario escribio y pisarlo le
 	 * borraria el trabajo justo cuando tiene que corregirlo.
 	 *
-	 * Los junk packets y el relleno arrancan con los valores de referencia.
-	 * H1-H4 se sortean en vez de tener un default fijo: un header constante
-	 * seria una firma nueva, que es lo que este paquete existe para no dejar.
+	 * Todo el juego de ofuscacion se SORTEA, no solo los headers: un tunel nuevo
+	 * con valores de fabrica hace que todas las instalaciones del paquete emitan
+	 * los mismos bytes, y eso es una firma -- justo lo que este paquete existe
+	 * para no dejar. Los I1-I5 quedan vacios: son opcionales y tienen su propio
+	 * boton.
 	 */
 	if (!$_POST) {
-		$pconfig['jc'] = $awgg['default_jc'];
-		$pconfig['jmin'] = $awgg['default_jmin'];
-		$pconfig['jmax'] = $awgg['default_jmax'];
-		$pconfig['s1'] = $awgg['default_s1'];
-		$pconfig['s2'] = $awgg['default_s2'];
-
-		$pconfig = array_merge($pconfig, awg_gen_headers());
+		$pconfig = array_merge($pconfig,
+				       awg_gen_obfuscation(awg_version_ceiling()));
 	}
 }
 
@@ -447,6 +471,19 @@ $section->addInput(new Form_StaticText(
 	"<span class='text-muted'>{$s(gettext('Both ends of a tunnel must obfuscate identically. If a parameter differs, the handshake simply never completes and nothing logs an error.'))}</span>"
 ));
 
+/*
+ * Volver a sortear todo. Un tunel nuevo ya viene sorteado; el boton esta para
+ * el que quiera cambiarlos, y para los tuneles viejos que se crearon con los
+ * valores de fabrica que este paquete traia antes.
+ */
+$section->addInput(new Form_Button(
+	'genobf',
+	'Randomise',
+	null,
+	'fa-solid fa-dice'
+))->addClass('btn-sm')
+  ->setHelp('Draws a fresh set for the level selected above. New tunnels arrive already randomised: the values that matter here are the ones nobody else is using, so a value shipped with the package would be a signature of its own. It does not touch the junk payloads below.');
+
 // Paquetes basura antes del handshake
 $group = new Form_Group('Junk Packets');
 
@@ -589,9 +626,17 @@ if ($awg2) {
 	}
 
 	$group->addClass('awg-v2-only')
-	      ->setHelp(gettext('Optional junk packets with content you choose, sent before the handshake. Leave empty unless you are matching a configuration that already uses them.'));
+	      ->setHelp(gettext('Optional junk packets with content you choose, sent before the handshake. Each is a template: <b hex> literal bytes, <t> a timestamp, <r N> / <rc N> / <rd N> that many random bytes, letters or digits.'));
 
 	$section->add($group);
+
+	$section->addInput(new Form_Button(
+		'genjunk',
+		'Randomise payloads',
+		null,
+		'fa-solid fa-dice'
+	))->addClass('btn-sm')
+	  ->setHelp('Fills the five with freshly drawn templates. There is no factory template and there will not be one: the same bytes leaving every installation of this package would be a better signature than the one being hidden. For the same reason the examples in Amnezia\'s documentation are not used — they are published.');
 }
 
 $form->add($section);
@@ -764,10 +809,50 @@ events.push(function() {
 		hideGroupInput('s3', below2);
 		hideGroupInput('s4', below2);
 		hideClass('awg-v2-only', below2);
+		hideInput('genjunk', below2);
 	}
 
 	$('#awgversion').change(awgApplyVersion);
 	awgApplyVersion();
+
+	// Botones de accion, no de submit: sin esto guardan el tunel.
+	$('#genobf, #genjunk').prop('type', 'button');
+
+	/*
+	 * El sorteo va al servidor en vez de hacerse en javascript por dos razones:
+	 * el sorteo bueno esta en PHP --random_int, no Math.random-- y asi la
+	 * pagina, el alta y cualquier otro camino sortean con el MISMO codigo. Dos
+	 * generadores separados se desincronizan sin que nada falle.
+	 */
+	$('#genobf').click(function(event) {
+		$.ajax({
+			url: '/awg/vpn_awg_tunnels_edit.php',
+			type: 'post',
+			data: {act: 'genobf', awgversion: $('#awgversion').val()},
+			success: function(response) {
+				var gen = JSON.parse(response);
+
+				for (var field in gen) {
+					$('#' + field).val(gen[field]);
+				}
+			}
+		});
+	});
+
+	$('#genjunk').click(function(event) {
+		$.ajax({
+			url: '/awg/vpn_awg_tunnels_edit.php',
+			type: 'post',
+			data: {act: 'genjunk'},
+			success: function(response) {
+				var gen = JSON.parse(response);
+
+				for (var field in gen) {
+					$('#' + field).val(gen[field]);
+				}
+			}
+		});
+	});
 
 	$('#copypubkey').click(function () {
 		var $this = $(this);

@@ -78,6 +78,9 @@ function awg_version_ceiling($use_cache = true) {
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_headers'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_gen_obfuscation'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_gen_junk_payload'));
+eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_junk_payload'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_obfuscation'));
 
 $pass = $fail = 0;
@@ -220,6 +223,139 @@ check('con un backend 1.x el 1.x sigue estando bien',
 	count(awg_validate_obfuscation(pc(array('awgversion' => '1')))) === 0);
 
 $test_ceiling = 2;
+
+printf("\n=== la gramatica de los I1-I5 ===\n\n");
+
+/*
+ * Las reglas son las de newObfChain() y sus builders, en device/obf.go. Lo que
+ * el backend acepta tiene que pasar, y lo que rechaza tiene que fallar: un
+ * validador mas laxo deja pasar un tunel que despues no levanta, y uno mas
+ * estricto bloquea una config que en otro lado funciona.
+ */
+$buenos = array(
+	'<b 0xf0f0>',
+	'<b f0f0>',
+	'<b 0x16030100><r 32>',
+	'<rc 8><t><rd 4>',
+	'<t>',
+	'<r 1000>',
+	'<b 0xaa> <r 8>',
+	'<d><ds><dz 2>');
+
+foreach ($buenos as $bueno) {
+	check("acepta {$bueno}", awg_validate_junk_payload($bueno) === '',
+		awg_validate_junk_payload($bueno));
+}
+
+$malos = array(
+	'<r 8'		=> 'un < sin cerrar',
+	'<z 5>'		=> 'una etiqueta que no existe',
+	'<b>'		=> '<b> sin argumento',
+	'<b 0xf>'	=> 'hex de largo impar',
+	'<b 0xzz>'	=> 'hex que no es hex',
+	'<r>'		=> '<r> sin largo',
+	'<r -5>'	=> 'largo negativo, que del otro lado revienta el proceso',
+	'<r 1001>'	=> 'largo que no entra en un paquete',
+	'<>'		=> 'etiqueta vacia',
+	'hola'		=> 'texto suelto sin etiquetas',
+	'<r 8>hola'	=> 'texto suelto despues de una etiqueta',
+	'hola<r 8>'	=> 'texto suelto antes de una etiqueta');
+
+foreach ($malos as $malo => $por_que) {
+	check("rechaza {$por_que}", awg_validate_junk_payload($malo) !== '',
+		"acepto '{$malo}'");
+}
+
+printf("\n=== el sorteo, que es lo que reemplaza a las constantes ===\n\n");
+
+$muestras = array();
+$fuera = $invalidos = 0;
+
+for ($i = 0; $i < 200; $i++) {
+	$gen = awg_gen_obfuscation(2);
+
+	$muestras[] = implode(',', $gen);
+
+	if (count(awg_validate_obfuscation(pc($gen))) !== 0) {
+		$invalidos++;
+	}
+
+	if (((int) $gen['jmin'] > (int) $gen['jmax']) ||
+	    ((int) $gen['jc'] < 1) || ((int) $gen['jc'] > 128) ||
+	    ((int) $gen['s1'] < 0) || ((int) $gen['s1'] > 1280) ||
+	    ((int) $gen['s4'] !== 0)) {
+		$fuera++;
+	}
+}
+
+check('200 sorteos: todos pasan su propia validacion', $invalidos === 0, "invalidos={$invalidos}");
+check('200 sorteos: todos dentro de rango, jmin<=jmax y S4 en cero', $fuera === 0, "fuera={$fuera}");
+check('200 sorteos: ninguno repetido, no hay constante escondida',
+	count(array_unique($muestras)) === 200,
+	sprintf('distintos=%d', count(array_unique($muestras))));
+
+$sin_awg2 = awg_gen_obfuscation(1);
+
+check('en 1.x no sortea S3/S4, que ese backend no entiende',
+	!isset($sin_awg2['s3']) && !isset($sin_awg2['s4']),
+	implode(',', array_keys($sin_awg2)));
+
+check('en 2.0 si los sortea', isset(awg_gen_obfuscation(2)['s3']));
+
+/*
+ * La razon por la que S1+148 != S2+92: que un init y un response no midan igual
+ * en el cable. Este backend los desempata por el header, pero otro extremo
+ * puede ser otra implementacion.
+ */
+$colisiones = 0;
+
+for ($i = 0; $i < 300; $i++) {
+	$gen = awg_gen_obfuscation(2);
+
+	if (((int) $gen['s1'] + 148) === ((int) $gen['s2'] + 92)) {
+		$colisiones++;
+	}
+}
+
+check('300 sorteos: ningun init mide lo mismo que un response', $colisiones === 0,
+	"colisiones={$colisiones}");
+
+printf("\n=== las plantillas sorteadas de los I ===\n\n");
+
+$plantillas = array();
+$rechazadas = 0;
+
+for ($i = 0; $i < 200; $i++) {
+	$p = awg_gen_junk_payload();
+	$plantillas[] = $p;
+
+	if (awg_validate_junk_payload($p) !== '') {
+		$rechazadas++;
+		if ($rechazadas === 1) { printf("       primera mala: %s -> %s\n", $p, awg_validate_junk_payload($p)); }
+	}
+}
+
+check('200 plantillas: todas pasan la validacion de la gramatica',
+	$rechazadas === 0, "rechazadas={$rechazadas}");
+
+check('200 plantillas: ninguna repetida',
+	count(array_unique($plantillas)) === 200,
+	sprintf('distintas=%d', count(array_unique($plantillas))));
+
+check('200 plantillas: todas empiezan con bytes literales propios',
+	count(array_filter($plantillas, function($p) { return strpos($p, '<b 0x') === 0; })) === 200);
+
+check('200 plantillas: ninguna repite el timestamp',
+	count(array_filter($plantillas, function($p) { return substr_count($p, '<t>') > 1; })) === 0);
+
+/*
+ * El ejemplo que publica la documentacion de Amnezia es justamente lo que no
+ * hay que emitir: si esta publicado, un DPI puede tenerlo.
+ */
+check('200 plantillas: ninguna es el ejemplo publicado en la documentacion',
+	count(array_filter($plantillas, function($p) {
+		return $p === '<b 0xd100000001><rc 8><t><r 50>';
+	})) === 0);
 
 printf("\n%d pasaron, %d fallaron\n", $pass, $fail);
 
