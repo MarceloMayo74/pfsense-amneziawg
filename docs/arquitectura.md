@@ -442,6 +442,67 @@ que la lee.
 
 ## 11. Riesgos abiertos
 
+### Multi-WAN: el túnel solo anda sobre la WAN del default gateway
+
+Medido el 14-08-2026 sobre el firewall, que tiene dos WAN: `pppoe0`
+(198.51.100.1, a donde apunta el dyndns) e `igb0` (192.168.0.117, **que tiene
+el default gateway**). Un cliente que discaba a la PPPoE se quedaba en
+"connecting" para siempre.
+
+La captura en `pppoe0` mostró solo tráfico entrante: las iniciaciones llegaban
+enteras y correctas —los 4 paquetes basura de `Jc` y la iniciación de 178 bytes
+con el relleno de `S1`—, `awg show` contaba 30 respuestas enviadas, y ninguna
+aparecía en el cable. El estado de pf dijo por dónde se iban:
+
+```
+all  udp 198.51.100.1:51822 <- 203.0.113.9:3197    entra por PPPoE
+igb0 udp 192.168.0.117:51822  -> 203.0.113.9:3197    sale por la OTRA WAN
+```
+
+La respuesta salía por el default gateway, con la dirección de origen de la otra
+interfaz. El cliente le habló a `198.51.100.1` y descarta cualquier cosa que
+no venga de ahí.
+
+**La causa es `amneziawg-go`, y la hereda de `wireguard-go`.** Responder desde
+la misma dirección por la que llegó el paquete se llama *sticky sockets*, y en
+`conn/sticky_default.go` —archivo con copyright de WireGuard LLC, no de
+Amnezia— está sin implementar para todo lo que no sea Linux:
+
+```go
+//go:build !linux || android
+const StdNetSupportsStickySockets = false
+
+// TODO: macOS, FreeBSD and other BSDs likely do support the sticky sockets
+// {get,set}srcControl feature set, but use alternatively named flags and
+// need ports and require testing.
+```
+
+El contraste que lo prueba, en la misma caja y con el mismo teléfono: el
+paquete oficial de WireGuard **sí** hace handshake por la PPPoE. No es
+WireGuard contra AmneziaWG: es `if_wg.ko` **en el kernel** contra
+`amneziawg-go` **en userspace**. Una implementación de kernel ya está adentro
+de la pila de red y sabe por dónde le llegó el paquete; un proceso de userspace
+tiene un socket UDP como cualquier otro y tiene que pedir esa información
+explícitamente. Corriendo `wireguard-go` en vez del módulo, WireGuard fallaría
+igual. La ofuscación no interviene: la falla es en la capa de sockets, debajo
+del protocolo.
+
+Es un costo nuevo de la decisión de la sección 2, al lado del 2,5x de CPU: **con
+`if_amn.ko` cargando, esto no pasaría.**
+
+Cuatro salidas, ninguna gratis:
+
+| | qué implica |
+|---|---|
+| Default gateway en la WAN del túnel | anda ya; cambia por dónde sale todo el tráfico |
+| Publicar el túnel por la WAN del default gateway | no toca el ruteo; hace falta port forward aguas arriba |
+| Regla flotante `route-to` + NAT de salida con static-port | anda, es frágil, hay que documentarlo |
+| Portar sticky sockets a FreeBSD en `amneziawg-go` | el arreglo de verdad, y es el TODO de upstream |
+
+Mientras no se resuelva, el selector de endpoint debería avisar cuando la
+dirección elegida no es la de la WAN que tiene el default gateway, que es el
+único momento en que alguien lo va a leer.
+
 - **Estabilidad de los procesos go a largo plazo.** El watchdog de la fase 5
   existe justamente porque el plugin de OPNsense consideró necesario tenerlo.
 - **Duplicación de mantenimiento con wgeasy.** Dos árboles de código con mucha
