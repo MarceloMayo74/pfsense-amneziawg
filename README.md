@@ -93,6 +93,7 @@ está en [docs/medicion-throughput.md](docs/medicion-throughput.md).
 
 ```sh
 .tools\php\php.exe tools\test-obfuscation.php   # 38 tests de validación
+.tools\php\php.exe tools\test-client-conf.php   # 32 tests del .conf del cliente
 sh tools/check-collisions.sh                    # símbolos globales vs WireGuard
 sh tools/check-globals.sh                       # $awgg sin declarar global
 ```
@@ -102,9 +103,22 @@ firewall de verdad. Ver la fase 5 en `docs/arquitectura.md`.
 
 ### Próximo paso concreto
 
-**Fase 6: integración con wgeasy.** Generación de configs de cliente con QR,
-zip y mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de
-las referencias tiene y la que hace usable el modo servidor.
+**Fase 6: configs de cliente.** Generación del `.conf` del cliente con QR, zip y
+mail, incluyendo los parámetros de ofuscación. Es la pieza que ninguna de las
+referencias tiene y la que hace usable el modo servidor. Va **dentro de la
+página de peers que ya existe**, no en un módulo aparte: wgeasy tiene que
+atornillarse por afuera porque no puede tocar el paquete oficial de WireGuard,
+pero acá la página de peer es propia.
+
+Empezada. El núcleo de generación está hecho y con tests
+(`awg_client_build_conf()` en `awg_client.inc`, 32 tests): arma el `.conf` con
+la ofuscación del túnel, respeta la versión del backend y se niega a generar un
+archivo al que le falte algo sin lo cual el cliente no conectaría. La ofuscación
+sale de `awg_obfuscation_pairs()`, la misma función que escribe el `.conf` del
+servidor, para que los dos extremos no puedan divergir.
+
+Falta la interfaz: campos del cliente en la página de peer, par de claves,
+dirección libre, endpoint, QR, descarga en zip y envío por mail.
 
 ## Por dónde empezar
 

@@ -701,6 +701,50 @@ function awg_backend_supports_awg2($use_cache = true) {
 }
 
 /*
+ * Los parametros de ofuscacion de un tunel, listos para escribir en un
+ * [Interface]: array('Jc' => '4', 'Jmin' => '40', ...).
+ *
+ * Existe como funcion aparte porque la usan DOS lados: el .conf del servidor y
+ * el .conf que se le entrega al cliente. Los dos extremos tienen que ofuscar
+ * identico o no hay handshake, asi que tener dos copias del mismo bucle es
+ * exactamente la clase de duplicacion que se desincroniza sin que nada falle
+ * hasta que un cliente no conecta.
+ *
+ * Los de AWG 2.0 se omiten contra un backend 1.x, y esto es lo unico que de
+ * verdad tiene que respetar la version: awg(8) aborta el parseo del archivo
+ * entero al encontrar una clave que no conoce, asi que un S3 de mas no degrada
+ * la ofuscacion sino que deja el tunel sin levantar.
+ *
+ * El nombre de la clave es el del campo capitalizado -- jc/jmin/s1/h1/i1 dan
+ * Jc/Jmin/S1/H1/I1 -- que es exactamente como los nombra el parser de
+ * amneziawg-tools.
+ *
+ * $awg2 se puede forzar para no pagar la sonda al backend cuando ya se conoce
+ * la respuesta, y para poder testear las dos ramas sin un firewall al lado.
+ */
+function awg_obfuscation_pairs($tunnel, $awg2 = null) {
+	global $awgg;
+
+	if ($awg2 === null) {
+		$awg2 = awg_backend_supports_awg2();
+	}
+
+	$pairs = array();
+
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		$value = trim((string) ($tunnel[$field] ?? ''));
+
+		if (($value === '') || ($spec['awg2'] && !$awg2)) {
+			continue;
+		}
+
+		$pairs[ucfirst($field)] = $value;
+	}
+
+	return $pairs;
+}
+
+/*
  * Sortea H1-H4 para un tunel nuevo.
  *
  * Los headers no tienen default: un valor fijo seria una firma nueva, que es
