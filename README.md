@@ -262,7 +262,12 @@ Lo que ya está resuelto ahí:
   Interfaces → Assignments sin parchear la base.
 - **Los 16 parámetros de ofuscación** con sus rangos y validaciones, incluida la
   trampa de que `H1`–`H4` son texto con rangos, no enteros.
-- **Un `.pkg` por ABI**, porque 2.8.1 es FreeBSD 15 y 2.9.0 es FreeBSD 16.
+- **AmneziaWG 2.0** (`S3`, `S4`, `I1`–`I5`): qué agrega, cuáles tienen que
+  coincidir en los dos extremos y cuáles no, la mini-gramática de los `I` y por
+  qué `S4` es el único que cuesta caudal — todo medido contra el backend en
+  [docs/amneziawg-2.0.md](docs/amneziawg-2.0.md).
+- **Un `.pkg` por ABI**, porque lleva binarios adentro. Hoy se compila uno solo:
+  `FreeBSD:16:amd64`, que es 2.9.0.
 
 ## Estructura
 
@@ -285,8 +290,8 @@ sh tools/fetch-references.sh
 
 ## Compilar el paquete
 
-Hay **un `.pkg` por ABI**: el paquete lleva adentro `amneziawg-go` y `awg`, y
-los binarios de FreeBSD 15 y 16 no son intercambiables.
+El paquete lleva adentro `amneziawg-go` y `awg`, así que hay un `.pkg` por ABI.
+Se compila el de 2.9.0 nada más.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build\make-pkg.ps1 -Abi FreeBSD:16:amd64
@@ -314,7 +319,11 @@ pkg add /root/pfSense-pkg-AmneziaWG-0.1.0-FreeBSD-16-amd64.pkg
 
 ## Objetivo
 
-pfSense CE 2.8.1 (FreeBSD 15) y 2.9.0-BETA (FreeBSD 16), amd64.
+**pfSense CE 2.9.0-BETA (FreeBSD 16), amd64.**
+
+2.8.1 (FreeBSD 15) queda fuera a propósito. Sostener un ABI que no se puede
+probar es peor que no sostenerlo: se publica algo que nadie verificó. Todo lo de
+este paquete está medido sobre una 2.9.0, y 2.8.1 es la versión que se va.
 
 ## Relación con wgeasy
 

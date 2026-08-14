@@ -11,7 +11,7 @@
 # the FreeBSD package repo for that ABI. They are cached under bin/<abi>/.
 
 param(
-    [ValidateSet('FreeBSD:15:amd64', 'FreeBSD:16:amd64')]
+    [ValidateSet('FreeBSD:16:amd64')]
     [string]$Abi = 'FreeBSD:16:amd64'
 )
 

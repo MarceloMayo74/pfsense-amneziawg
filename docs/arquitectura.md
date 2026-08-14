@@ -57,9 +57,10 @@ Implementación userspace en Go. Crea una interfaz TUN y habla el protocolo
 desde userland. Ventajas decisivas acá:
 
 - No depende de ABI de kernel. Sobrevive a las actualizaciones de pfSense.
-- Está empaquetado en los ports de FreeBSD (`amneziawg-go-0.2.16_7`) para
-  **FreeBSD 15 y 16**, o sea para las dos versiones de pfSense objetivo.
-  No hace falta compilar nada ni instalar Go.
+- Está empaquetado en los ports de FreeBSD (`amneziawg-go-0.2.16_7`), así que
+  arrancar no requirió compilar nada. Hoy igual se compila con parche propio
+  —sticky sockets, ver sección 11— desde el mismo tag `v0.2.16`, con
+  `tools/build-amneziawg-go.ps1`.
 - Arquitectura ya probada en producción sobre pfSense 2.8.1 por
   `qtronixx/pfSense-pkg-amneziawg-client`.
 
@@ -288,13 +289,17 @@ que devuelven por referencia se declaran `function &nombre`, y olvidarse del
 
 ## 9. Build y distribución
 
-**Un `.pkg` por ABI.** Los binarios embebidos no son intercambiables entre
-FreeBSD 15 y 16:
+**Un `.pkg` por ABI**, porque los binarios embebidos no son intercambiables. Se
+compila **uno solo**:
 
 | pfSense | FreeBSD | ABI |
 |---|---|---|
-| 2.8.1 | 15 | `FreeBSD:15:amd64` |
 | 2.9.0-BETA | 16.0-CURRENT | `FreeBSD:16:amd64` |
+
+2.8.1 / FreeBSD 15 quedó fuera del alcance el 14-08-2026. No hay una 2.8.1
+donde probar, y sostener un ABI sin poder verificarlo es publicar algo que nadie
+comprobó. El `amneziawg-go` propio es Go puro sin CGO, así que el día que haga
+falta ese ABI el mismo binario sirve; lo que faltaría es probarlo.
 
 El `make-pkg.ps1` necesita un paso previo que resuelva y descargue los binarios
 del ABI correspondiente. **No se puede adivinar el nombre de archivo**: el repo
