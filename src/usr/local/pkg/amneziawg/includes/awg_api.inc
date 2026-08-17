@@ -1452,6 +1452,31 @@ function awg_gen_psk() {
 /*
  * Return the next available AmneziaWG port
  */
+/*
+ * Los numeros de puerto que aparecen en una salida de sockstat(1).
+ *
+ * Va aparte de next_awg_port() para poder probarla: lo unico fragil de todo
+ * esto es leer una tabla de texto, y una tabla que cambie de forma no falla --
+ * devuelve una lista vacia, que es indistinguible de "no hay nada tomado".
+ *
+ * La direccion local es la penultima columna y termina en ':puerto' (IPv4, IPv6
+ * y unix con puerto) o en '.puerto'. Las lineas de sockets unix no tienen
+ * puerto y no matchean, que es lo correcto. Se es generoso a proposito: saltear
+ * de mas cuesta un numero mas arriba, saltear de menos cuesta un tunel que se
+ * guarda bien y no levanta.
+ */
+function awg_ports_in_use($lines) {
+	$taken = array();
+
+	foreach ((array) $lines as $line) {
+		if (preg_match('/[:.](\d+)\s+\S+\s*$/', (string) $line, $m)) {
+			$taken[(int) $m[1]] = true;
+		}
+	}
+
+	return $taken;
+}
+
 function next_awg_port() {
 	global $awgg;
 
@@ -1467,17 +1492,11 @@ function next_awg_port() {
 	 * guardaba bien y no levantaba, con un 'Address already in use' que aparece
 	 * al aplicar y no al elegir el puerto.
 	 */
-	$taken = array();
-
 	$out = array();
 
 	exec('/usr/bin/sockstat -4 -6 -u -l 2>/dev/null', $out);
 
-	foreach ($out as $line) {
-		if (preg_match('/[:.](\d+)\s+\S+\s*$/', $line, $m)) {
-			$taken[(int) $m[1]] = true;
-		}
-	}
+	$taken = awg_ports_in_use($out);
 
 	for ($idx = $awgg['default_port']; $idx < $awgg['max_port']; $idx++) {
 		// Check to see if the port is already in use

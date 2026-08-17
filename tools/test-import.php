@@ -79,6 +79,7 @@ function awg_gen_publickey($privkey, $json = false) {
 		'pubkey'		=> 'cGDVKdiXQL1p+U9CD9zSHGCLKgnHFsGVFyKw1UPFMWo=');
 }
 
+eval(extract_function("{$src}/awg_api.inc", 'awg_ports_in_use'));
 eval(extract_function("{$src}/awg_import.inc", 'awg_import_parse'));
 eval(extract_function("{$src}/awg_import.inc", 'awg_import_level'));
 eval(extract_function("{$src}/awg_import.inc", 'awg_import_build'));
@@ -273,6 +274,39 @@ check('sin ningun peer',
 check('con un peer sin PublicKey',
       awg_import_build(array('interface' => array('privatekey' => $clave_a), 'peers' => array(array())), '', $e8) === false);
 check('y el motivo se explica', strlen((string) $e7) > 20, (string) $e7);
+
+/*
+ * El puerto que se le asigna a un tunel importado. Un .conf de cliente casi
+ * nunca trae un ListenPort util, asi que lo elige el firewall -- y elegir uno
+ * que ya esta tomado da un tunel que se guarda bien y no levanta nunca, con el
+ * error recien al aplicar.
+ *
+ * Las lineas son salida real de sockstat(1) en un pfSense con el WireGuard
+ * nativo corriendo, que es el caso que rompia: 51820 tomado por otro paquete.
+ */
+echo "\n=== los puertos que ya estan tomados ===\n";
+
+$sockstat = array(
+	'USER    COMMAND      PID FD PROTO   LOCAL ADDRESS         FOREIGN ADDRESS      ',
+	'root    sshd-sessi 94784  9 stream  (not connected)       ??                   ',
+	'root    kea-dhcp4  70123 11 stream  /var/run/kea/kea4-ctr ??                   ',
+	'root    kea-dhcp4  70123 15 udp4    192.168.10.1:67       *:*                  ',
+	'unbound unbound    67848  3 udp6    *:53                  *:*                  ',
+	'root    wireguard  12345  8 udp4    *:51820               *:*                  ',
+	'root    amneziawg- 45867 10 udp4    *:51822               *:*                  ',
+	'root    openvpn    54321  6 udp4    *:1194                *:*                  ');
+
+$taken = awg_ports_in_use($sockstat);
+
+check('encuentra el puerto del WireGuard nativo, que es el caso que rompia',
+      isset($taken[51820]), implode(',', array_keys($taken)));
+check('y el de un tunel de este paquete', isset($taken[51822]));
+check('y los del resto del sistema', isset($taken[67]) && isset($taken[53]) && isset($taken[1194]));
+check('no inventa puertos con las lineas de sockets unix',
+      count($taken) === 5, implode(',', array_keys($taken)));
+check('una salida vacia no rompe', awg_ports_in_use(array()) === array());
+check('una tabla con otra forma tampoco',
+      awg_ports_in_use(array('cualquier cosa', '')) === array());
 
 printf("\n%d pasaron, %d fallaron\n", $pass, $fail);
 
