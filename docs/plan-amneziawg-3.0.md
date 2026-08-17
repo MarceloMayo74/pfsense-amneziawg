@@ -319,12 +319,49 @@ Aparte, sin relación con 3.0: `$tunnel_output_keys` mapea el índice 4 a
 `fwmark`, y en un dump de 2.0 ahí está `Jc`. Es inofensivo —nadie más lee
 `fwmark` en el árbol— pero viene mal desde el fork de WireGuard.
 
+## Verificado entre dos pfSense (17-08-2026)
+
+La prueba que ni los tests ni el spike pueden dar: **dos instalaciones
+independientes hablando 3.1 por internet**, cada una con su proceso, sus claves
+y su configuración.
+
+- Cajas: `192.168.30.1` (dos WAN, publica el túnel por la **PPPoE**, que es la
+  que **no** tiene el default gateway) y `192.168.10.1` (una sola WAN, disca al
+  duckdns de la primera). Las dos 2.9.0-BETA, `FreeBSD:16:amd64`, con el mismo
+  `.pkg`.
+- Handshake completo y renovándose, con los 25 parámetros iguales de los dos
+  lados —`HeaderProtectionKey` incluida, S4 en 16 por la regla del nonce—. Si
+  uno solo no coincidiera, no cerraría: eso es lo que valida la ofuscación.
+- Un **único** estado de pf, en `pppoe0`: sticky sockets sirviendo a un peer
+  remoto real, no a un cliente de la misma LAN.
+- Tráfico de usuario: ping por dentro del túnel, 4/4, ~4,5 ms.
+
+Dos cosas que costaron un rato y no son del paquete: un túnel recién creado no
+levanta si el **servicio está deshabilitado** (`enable => off` es el default de
+una instalación nueva, y `awg_tunnel_sync()` devuelve 0 sin hacer nada), y las
+reglas que crea uno por costumbre en la interfaz del túnel apuntan **a la LAN**,
+así que un ping a la IP del propio túnel cae en el block por defecto de los dos
+lados.
+
+Y un detalle del propio paquete que conviene recordar: cualquier script de CLI
+que incluya `awg_guiconfig.inc` **no puede recibir argumentos**. `awg_service.inc`
+arranca su dispatcher con `isset($argv[1])` y muere con "This script can only be
+executed by php_awg". Se pasa la entrada por archivo o por variable de entorno.
+
 ## Antes de empezar hay que confirmar
 
-1. **Qué entienden los clientes de verdad.** El repo `amneziawg-android` no
-   publica releases de GitHub, pero su tag más nuevo es `v3.1.20260814`, con
-   `v3.0.1` antes. Falta ver qué sirve hoy Play/F-Droid: de eso depende si
-   3.0 sirve para un teléfono o arranca siendo solo firewall-a-firewall.
+1. ~~**Qué entienden los clientes de verdad.**~~ **Contestado el 17-08-2026, y
+   la respuesta tiene dos mitades.** La app de Android instalada rechaza el
+   `.conf` de un túnel 3.0 con un error de atributo desconocido en
+   `[Interface]`: la única clave de 3.x que lleva ese archivo es
+   `HeaderProtectionKey`, así que es esa. Pero **el código de los clientes sí
+   tiene 3.1**: el `go.mod` del cliente de Windows en master pide
+   `amneziawg-go/v3 v3.1.20260814` —la misma versión que compilamos— con los
+   commits `feat: add awg3 support` (24-07) y `feat: add awg3.1 support`
+   (13-08). Lo que pasa es que la última release publicada es la **2.0.2, del
+   21-07**, anterior a esos commits. O sea: el soporte está escrito y sin
+   publicar, no ausente. Hasta que salgan esas releases, 3.x es
+   firewall-a-firewall o hay que compilar el cliente.
 2. **El corte exacto 3.0 vs 3.1.** El clon de `reference/amneziawg-tools` está
    aplastado en un solo commit, así que no se pudo diffear `v3.0.20260805`
    contra `v3.1.20260812`. La tabla de arriba sigue lo que ya decía el
