@@ -32,9 +32,22 @@ Los túneles, con su estado y sus peers:
 ![Túneles](docs/img/tunnels.png)
 
 La sección **Obfuscation**, que es lo que este paquete tiene y ningún otro: el
-selector de compatibilidad y los parámetros, todos sorteados por túnel.
+selector de compatibilidad y los 25 parámetros, sorteados por túnel. Lo de 1.x y
+2.0 —paquetes basura, relleno del handshake, magic headers—:
 
-![Ofuscación](docs/img/obfuscation.png)
+![Ofuscación, 1.x y 2.0](docs/img/obfuscation1.png)
+
+Y lo que estrenaron 3.0 y 3.1, que aparece sólo si el selector llega: la clave de
+protección de headers con su botón propio, el relleno de contenido, los cinco
+tiempos del protocolo y los dos booleanos:
+
+![Ofuscación, 3.0 y 3.1](docs/img/obfuscation2.png)
+
+**Importar** un `.conf` que ya existe en otro lado —otro firewall, un proveedor,
+o uno que exportó este mismo paquete— en vez de transcribir 25 valores a mano,
+donde un solo dígito mal no da error y deja el handshake sin cerrar para siempre:
+
+![Importar](docs/img/import.png)
 
 La lista de peers, con descargar, QR y mail al lado de editar:
 

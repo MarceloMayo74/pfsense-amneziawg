@@ -655,7 +655,14 @@ if ($awg2) {
 	}
 
 	$group->addClass('awg-v2-only')
-	      ->setHelp(gettext('Optional junk packets with content you choose, sent before the handshake. Each is a template: <b hex> literal bytes, <t> a timestamp, <r N> / <rc N> / <rd N> that many random bytes, letters or digits.'));
+	      /*
+	       * Las etiquetas van escapadas: el texto de ayuda se imprime como HTML,
+	       * asi que <b hex> y <t> los toma el navegador como marcado y los
+	       * desaparece -- dejando 'a template: literal bytes, a timestamp, / /
+	       * that many random bytes', que no explica nada. Justamente los
+	       * ejemplos que hacian falta.
+	       */
+	      ->setHelp(gettext('Optional junk packets with content you choose, sent before the handshake. Each is a template: <code>&lt;b hex&gt;</code> literal bytes, <code>&lt;t&gt;</code> a timestamp, <code>&lt;r N&gt;</code> / <code>&lt;rc N&gt;</code> / <code>&lt;rd N&gt;</code> that many random bytes, letters or digits.'));
 
 	$section->add($group);
 
