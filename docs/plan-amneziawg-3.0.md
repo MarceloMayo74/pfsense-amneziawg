@@ -198,8 +198,12 @@ Tres cosas, ninguna prevista:
    publica binarios de Linux, Alpine y Windows. El script lo desactiva con
    `-DAWG_NO_KERNEL_IPC`: es el camino que habla con `if_amn.ko`, que en
    pfSense no carga, y las tres llamadas ya estaban detrás de
-   `IPC_SUPPORTS_KERNEL_INTERFACE`. **Vale la pena reportarlo upstream**, como
-   se hizo con sticky sockets.
+   `IPC_SUPPORTS_KERNEL_INTERFACE`. **Reportado upstream el 17-08-2026**:
+   [amneziawg-tools#68][issue68]. Está roto desde que se abrió la línea 3.0 —el
+   archivo es idéntico en `v3.0.20260805` y `v3.1.20260812`— y se les pasa
+   porque su workflow compila Alpine, Ubuntu y Windows nada más.
+
+[issue68]: https://github.com/amnezia-vpn/amneziawg-tools/issues/68
 
 #### La bajada: medida, no supuesta
 
