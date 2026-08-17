@@ -73,56 +73,64 @@ solo Apache. Es lo que lee `pkg info -l` y cualquier mirror que lo redistribuya.
 ## La fuente correspondiente del `awg`
 
 "La fuente correspondiente" no es el master de upstream: es exactamente lo que
-produjo *ese* binario. El binario no lo compilamos nosotros — sale del port
-`net/amnezia-tools` de FreeBSD, que fija un tag y le aplica sus propios
-parches. Sin los parches del port, la fuente está incompleta.
+produjo *ese* binario. Hasta la versión 1.0.0 el binario salía del port
+`net/amnezia-tools` de FreeBSD, así que la fuente correspondiente eran el
+distfile del port **más sus parches** — y demostrarlo era una cadena de tres
+eslabones que había que verificar contra el repositorio de FreeBSD.
 
-La cadena, verificada el 14-08-2026 contra el repositorio de paquetes de
-FreeBSD:
+**Desde AmneziaWG 3.x lo compilamos nosotros**, y no por gusto: el port sigue
+clavado en 1.0.20250903, que es 2.0, y no hay binario de FreeBSD de 3.x en
+ningún lado — los releases de Amnezia publican Alpine, Ubuntu y Windows.
+
+La cadena quedó de dos eslabones y sin nada que descubrir:
 
 ```
-binario del .pkg                        sha256 2ce33abd…7918b7f4
-  == awg de amnezia-tools-1.0.20250903 (FreeBSD:16:amd64)   [idéntico byte a byte]
-  <- distfile amnezia-vpn-amneziawg-tools-v1.0.20250903_GH0.tar.gz
-                                        sha256 d729a6f5…d0c907d7
-  == tarball del tag v1.0.20250903 en GitHub                [idéntico byte a byte]
+binario del .pkg                        sha256 18569c90…4f7cf5a5
+  <- tools/build-awg-freebsd.sh, en FreeBSD 16.0-CURRENT amd64
+  <- awg-src-3.1.20260812.tar.gz        sha256 b198a7c7…c54af898
+  == fuente del tag v3.1.20260812 de amneziawg-tools
 ```
 
-Ese último `==` es el que hace práctico todo lo demás: el distfile de FreeBSD y
-el tarball que sirve GitHub para el mismo tag son el mismo archivo, así que la
-fuente se puede bajar de GitHub cuando `distcache.FreeBSD.org` no se alcanza —
-que es el caso desde esta máquina de build, igual que `pkg.freebsd.org`.
+El script deja los dos hashes en `dist/awg-src-<versión>.SHA256` y lo que usó
+para compilar en `dist/awg-src-<versión>.BUILDINFO` — sistema, compilador,
+fecha y línea de comandos. Se corre en una VM de FreeBSD, no en el firewall:
+pfSense no trae `cc` ni `/usr/include`.
 
-Lo arma [`tools/fetch-sources.sh`](../tools/fetch-sources.sh), que baja el port
-entero (Makefile, distinfo, `pkg-descr` y todos los parches de `files/`) más el
-tarball de upstream, verifica el sha256 contra el distinfo del port y deja
-`dist/awg-src-<versión>.tar.gz`.
+**Hay una modificación, y una sola**: el build define `AWG_NO_KERNEL_IPC`, que
+deja afuera `src/ipc-freebsd.h`. Ese archivo **no compila** contra 3.x —está
+escrito contra el `containers.h` viejo, donde H1-H4 eran cadenas— y es el
+camino que habla con el módulo `if_amn`, que en pfSense no carga. Todo lo que
+hace este paquete va por el camino de userspace.
 
-**La trampa**: `awg --version` dice `v1.0.20250521`, que **no** es la versión
-del port ni un tag de upstream. Es un valor que el port escribe con
-`files/patch-version.h`, porque upstream se olvida de tocar `version.h` — en el
-tag v1.0.20250903 ese archivo todavía dice `1.0.20210914`. La versión que sirve
-para encontrar la fuente es la del paquete de FreeBSD, que está en su
-`+MANIFEST`, no la que imprime el binario.
+Eso importa para la GPL: la fuente correspondiente ya no es sólo el tarball,
+sino **el tarball más el script que lo modifica y lo compila**. El script está
+en el repositorio público, que es lo que la licencia pide.
+
+**La trampa que sigue vigente**: `awg --version` no sirve para encontrar la
+fuente. El del port decía `v1.0.20250521` estando en 1.0.20250903, porque
+upstream se olvida de tocar `version.h` y el port lo parchea. El nuestro
+reporta `3.1.20260812` porque en ese tag upstream sí lo actualizó — pero la
+versión de referencia es la del tag que dice el `BUILDINFO`, no la que imprime
+el binario. `amneziawg-go` tiene la misma trampa al revés: su `version.go` sigue
+diciendo `0.0.20250522` hasta en el tag 3.1, y por eso nuestro build le estampa
+el tag encima.
 
 ## En cada release
 
-1. `sh tools/fetch-sources.sh` — con la versión del port si cambió.
-2. Subir `dist/awg-src-<versión>.tar.gz` como asset del release, al lado del
-   `.pkg`. **Un release con el `.pkg` y sin ese tarball incumple la GPL.**
-3. Si se actualizó el binario, actualizar en `NOTICE` la versión y los dos
-   sha256, y volver a correr la verificación de la cadena.
-
-Para verificar la cadena hace falta un firewall, porque `pkg.freebsd.org` no se
-alcanza desde acá: se baja el paquete `amnezia-tools` del catálogo, se saca el
-`awg` de adentro y se compara su sha256 con el de `/usr/local/bin/awg`
-instalado.
+1. Compilar en la VM: `sh tools/build-awg-freebsd.sh`, y traerse `out/awg` a
+   `bin/<ABI>/` y el tarball, el `.SHA256` y el `.BUILDINFO` a `dist/`.
+2. Subir esos tres archivos como assets del release, al lado del `.pkg`. **Un
+   release con el `.pkg` y sin la fuente incumple la GPL.**
+3. Si cambió el binario, actualizar en `NOTICE` la versión y los dos sha256.
 
 ## Lo que queda abierto
 
-- **Compilar `awg` nosotros**, como ya se hace con `amneziawg-go`. Sacaría toda
-  la parte frágil de esto: la fuente correspondiente sería, por definición, el
-  tag que compilamos. Necesita toolchain de FreeBSD y no hay apuro.
+- ~~Compilar `awg` nosotros~~. **Hecho el 17-08-2026**, y por el motivo que se
+  había anotado: la fuente correspondiente es ahora, por definición, el tag que
+  compilamos. Lo que lo apuró no fue la fragilidad sino que 3.x no tiene binario
+  de FreeBSD en ningún lado.
+- `tools/fetch-sources.sh` quedó sin objeto: existía para demostrar la cadena
+  del port, que ya no es de donde sale el binario.
 - Los archivos de `spike/` y `tools/` no llevan encabezado de licencia. No se
   distribuyen en el `.pkg`; los cubre el `LICENSE` del repositorio.
 

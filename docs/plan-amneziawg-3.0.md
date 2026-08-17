@@ -231,20 +231,17 @@ porque amneziawg-go se demoniza solo y el hijo directo de `daemon(8)` se va
 enseguida. O sea que en la práctica el PID lo encuentra siempre el `pgrep` de
 respaldo. Es así desde 2.0, no lo cambió 3.1.
 
-Tareas que quedan:
+Tareas que quedan: **ninguna de la fase 1**. Todo cerrado el 17-08-2026:
 
-1. `NOTICE` y `docs/licencias.md`: el `awg` deja de ser el del port, y
-   `amneziawg-go` suma dependencias —`goccy/go-yaml`, `go.uber.org/atomic` y el
-   **SDK de Outline** (`golang.getoutline.org/sdk`), que es de donde sale el
-   TLS/REALITY de 3.0—. Ninguna dio problema al cruzar a `freebsd/amd64` con
-   `CGO_ENABLED=0`; el binario creció 20 KB.
-2. Decidir qué hace `tools/fetch-sources.sh`, que existía para demostrar la
-   cadena "binario del .pkg = binario del port = distfile = tag". Con el
-   binario propio esa cadena ya no aplica; o se adapta o se retira. Lo que hay
-   que publicar ahora es lo que deja el script nuevo:
-   `dist/awg-src-3.1.20260812.tar.gz` con su `.SHA256` y su `.BUILDINFO`.
-3. Rearmar el `.pkg` con los dos binarios nuevos, que hasta ahora se pusieron
-   a mano en el firewall para probar.
+1. ~~`NOTICE` y `docs/licencias.md`~~. Hechos. De paso quedó comprobado que las
+   dependencias nuevas del `go.mod` —el SDK de Outline, gvisor, quic-go— **no
+   entran en el binario**: `go version -m` lista solo `x/crypto`, `x/net` y
+   `x/sys`, las mismas de siempre. No hubo licencias nuevas que declarar.
+2. ~~Decidir qué hace `tools/fetch-sources.sh`~~. **Retirado**: existía para
+   demostrar la cadena "binario del .pkg = binario del port = distfile = tag", y
+   con el binario propio esa cadena no aplica. Lo que se publica ahora lo deja
+   `tools/build-awg-freebsd.sh`: el tarball, su `.SHA256` y su `.BUILDINFO`.
+3. ~~Rearmar el `.pkg`~~. Hecho, y es el que está instalado en las dos cajas.
 
 Estado del firewall de prueba (192.168.30.1): **sin el paquete**. Se instaló el
 1.0.0 con los binarios 3.1 puestos a mano para correr las pruebas de arriba, y

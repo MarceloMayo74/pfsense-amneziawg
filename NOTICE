@@ -23,8 +23,21 @@ this package carry the same licence.
 2. /usr/local/bin/awg -- GNU General Public License, version 2
 --------------------------------------------------------------
 
-amneziawg-tools, a fork of wireguard-tools. Distributed unmodified, exactly as
-built by the FreeBSD port net/amnezia-tools 1.0.20250903.
+amneziawg-tools 3.1.20260812, a fork of wireguard-tools, built from upstream's
+own release tag by tools/build-awg-freebsd.sh in the source repository.
+
+Earlier releases of this package shipped the binary from the FreeBSD port
+net/amnezia-tools untouched. That stopped being possible at AmneziaWG 3.x: the
+port is still at 1.0.20250903, and no FreeBSD binary of 3.x is published
+anywhere.
+
+It carries one modification, and only one: the build defines
+AWG_NO_KERNEL_IPC, which leaves out src/ipc-freebsd.h. That file does not
+compile against 3.x -- it is written against the older containers.h, where
+H1-H4 were strings -- and it is the path that talks to the if_amn kernel
+module, which pfSense cannot load. Everything this package does goes through
+the userspace path instead. The change is one line of sed in the build script,
+which is part of the corresponding source described at the end of this file.
 
     Copyright (C) 2015-2021 Jason A. Donenfeld <Jason@zx2c4.com>
     Copyright (C) 2018-2021 WireGuard LLC
@@ -41,9 +54,15 @@ file.
 3. /usr/local/bin/amneziawg-go -- MIT
 -------------------------------------
 
-amneziawg-go 0.0.20250522, a fork of wireguard-go. Built from source with the
+amneziawg-go 3.1.20260814, a fork of wireguard-go. Built from source with the
 FreeBSD sticky-sockets patch that lives in patches/amneziawg-go/ in the source
-repository, which is why `amneziawg-go --version` reports -sticky1.
+repository, which is why `amneziawg-go --version` reports -sticky1. Without it
+a tunnel published on a WAN that does not hold the default route never
+completes a handshake; the patch is upstream as amneziawg-go#180.
+
+The binary links golang.org/x/crypto, golang.org/x/net and golang.org/x/sys,
+all BSD-3-Clause (see `go version -m`). Its go.mod names more -- the Outline
+SDK, gvisor, quic-go -- but none of them end up in this build.
 
     Copyright (C) 2017-2025 WireGuard LLC. All Rights Reserved.
 
@@ -61,24 +80,24 @@ header.
 Corresponding source for the GPLv2 part
 =======================================
 
-The `awg` binary in this package is byte for byte the one from the FreeBSD
-package amnezia-tools-1.0.20250903 for FreeBSD:16:amd64:
+The `awg` binary in this package for FreeBSD:16:amd64:
 
-    sha256  2ce33abdbdccdb81a4ad08aa763d3783b2997a8973d2366bfc8467647918b7f4
+    sha256  18569c903f01ed052db382a821f6563b232ecc7c9693e08b0df9a36e4f7cf5a5
 
-It was built from
+was built from the source of
 
-    https://github.com/amnezia-vpn/amneziawg-tools, tag v1.0.20250903
-    distfile  amnezia-vpn-amneziawg-tools-v1.0.20250903_GH0.tar.gz
-    sha256    d729a6f54aafcd55b2cbb7324f09ca8f0d2536772970652bf822a271d0c907d7
+    https://github.com/amnezia-vpn/amneziawg-tools, tag v3.1.20260812
+    tarball  awg-src-3.1.20260812.tar.gz
+    sha256   b198a7c7dd27676cc03372a092f057578c3d082ecb4b2981a2b8ba29c54af898
 
-plus the patches and the build recipe in the FreeBSD ports tree, under
-net/amnezia-tools -- both are part of the corresponding source and both are
-included in the tarball described below.
+by tools/build-awg-freebsd.sh, on FreeBSD 16.0-CURRENT amd64. That script is
+the build recipe and it carries the one modification named in section 2, so it
+is part of the corresponding source too -- it is in the public repository at
+https://github.com/MarceloMayo74/pfsense-amneziawg, and the build it performed
+is recorded in awg-src-3.1.20260812.BUILDINFO next to the tarball.
 
-Every release that bundles this binary is published with that source attached
-to it, as awg-src-1.0.20250903.tar.gz. The script tools/fetch-sources.sh
-rebuilds it and checks it against the hashes above.
+Every release that bundles this binary is published with that tarball, its
+BUILDINFO and its SHA256 attached to it.
 
 If you received this package without that source, write to
 marcelomayo1974@gmail.com and a copy will be sent to you.

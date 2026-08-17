@@ -8,18 +8,22 @@ WireGuard para evadir DPI. La criptografía es la misma; lo que cambia es la
 forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
-> **Probado sólo en pfSense CE 2.9.0-BETA (FreeBSD 16), amd64.** Es la única
-> versión sobre la que corrió, y sobre un solo firewall. En 2.8.1 (FreeBSD 15)
+> **Probado sólo en pfSense CE 2.9.0-BETA (FreeBSD 16), amd64**, sobre dos
+> firewalls, uno contra el otro. En 2.8.1 (FreeBSD 15)
 > no se probó y no se publica un `.pkg`: el que hay declara el ABI
 > `FreeBSD:16:amd64`, así que `pkg add` lo rechaza ahí en vez de instalar algo
 > que nadie verificó. El detalle de por qué, en [Objetivo](#objetivo).
 
-> **Estado: fase 6 terminada.** El paquete instala, tiene los 16 campos de
-> ofuscación, levanta y baja túneles desde la GUI supervisando un proceso
-> `amneziawg-go` por túnel, tiene watchdog para los que se caen solos, y entrega
-> la configuración del cliente por los tres caminos: descarga, QR y mail. El
-> caudal sobre el hardware objetivo está medido: ~830 Mbps, y ofuscar no cuesta
-> rendimiento.
+> **Estado: AmneziaWG 3.1.** El paquete instala, tiene los **25** campos de
+> ofuscación —los 16 de 2.0 más los nueve que estrenaron 3.0 y 3.1—, levanta y
+> baja túneles desde la GUI supervisando un proceso `amneziawg-go` por túnel,
+> tiene watchdog para los que se caen solos, **importa un `.conf` ajeno** para
+> conectarse a un túnel que ya existe en otro lado, y entrega la configuración
+> del cliente por los tres caminos: descarga, QR y mail. El caudal sobre el
+> hardware objetivo está medido: ~830 Mbps, y ofuscar no cuesta rendimiento.
+>
+> 3.1 está verificado **entre dos pfSense**, por internet: handshake con los 25
+> parámetros coincidiendo, protección de headers activa y tráfico cruzando.
 
 ## Cómo se ve
 
@@ -276,13 +280,15 @@ clave que no conoce, y la app de Android rechaza el archivo completo con
 Por eso el túnel tiene un selector de **compatibilidad**, y la pregunta que hace
 no es "qué versión tengo" sino **qué entiende el extremo más débil de este
 túnel**. Se puede elegir menos de lo que soporta el firewall, porque el otro
-extremo puede ser más viejo: la app estable de Android es 2.0.x y todo lo 3.x
-está publicado como *prerelease*.
+extremo puede ser más viejo. Y hoy eso es literal: el soporte de 3.x **está
+escrito y sin publicar** en los clientes — el de Windows tiene 3.1 en su master
+y su última release es la 2.0.2, anterior a esos commits. La app que se instala
+hoy rechaza un `.conf` de 3.0.
 
 Lo que **no** se ofrece se dice y se explica por qué, con las dos razones
 separadas: hasta dónde llega el `awg` que va adentro del `.pkg` —detectado con
 una sonda, no preguntado— y hasta dónde sabe escribir este paquete. Hoy las dos
-dan 2.0.
+dan **3.1**.
 
 La decisión vive en `awg_obfuscation_pairs()`, no en la pantalla. Es la
 diferencia entre que ande y que parezca que anda: los campos escondidos se
@@ -290,9 +296,10 @@ siguen guardando a propósito —para no borrarle al usuario valores que no vio�
 que si el filtro viviera en la GUI, bajar un túnel de 2.0 a 1.x seguiría
 escribiendo su `S3` en los dos archivos mientras la pantalla dice 1.x.
 
-Verificado con 77 tests locales de validación, 89 del `.conf` del cliente y
-14 sobre el firewall (`spike/verify-version.php`), que incluyen el control
-negativo de la sonda y que los `.conf` de los dos niveles los parsee `awg(8)`.
+Verificado con 113 tests locales de validación, 96 del `.conf` del cliente, 54
+del importador y 14 más sobre el firewall (`spike/verify-version.php`), que
+incluyen el control negativo de la sonda y que los `.conf` de los cuatro niveles
+los parsee `awg(8)`.
 
 ### Todo se sortea, y por qué eso no es un detalle
 
@@ -357,12 +364,16 @@ Lo que ya está resuelto ahí:
   firewall: [docs/plan-sticky-freebsd.md](docs/plan-sticky-freebsd.md).
 - **Interfaces `tun9000`–`tun9999`.** Es lo que hace que pfSense las liste en
   Interfaces → Assignments sin parchear la base.
-- **Los 16 parámetros de ofuscación** con sus rangos y validaciones, incluida la
+- **Los 25 parámetros de ofuscación** con sus rangos y validaciones, incluida la
   trampa de que `H1`–`H4` son texto con rangos, no enteros.
 - **AmneziaWG 2.0** (`S3`, `S4`, `I1`–`I5`): qué agrega, cuáles tienen que
   coincidir en los dos extremos y cuáles no, la mini-gramática de los `I` y por
   qué `S4` es el único que cuesta caudal — todo medido contra el backend en
   [docs/amneziawg-2.0.md](docs/amneziawg-2.0.md).
+- **AmneziaWG 3.0 y 3.1**: qué agrega cada clave, por qué la protección de
+  headers obliga a pagar `S4`, cuáles tienen que coincidir en los dos extremos y
+  por qué bajar de nivel obliga a rehacer el proceso —
+  [docs/amneziawg-3.0.md](docs/amneziawg-3.0.md).
 - **Un `.pkg` por ABI**, porque lleva binarios adentro. Hoy se compila uno solo:
   `FreeBSD:16:amd64`, que es 2.9.0.
 
@@ -441,8 +452,13 @@ es **GPLv2** y `amneziawg-go` es **MIT**. Son programas aparte que el paquete
 ejecuta —no se linkea nada—, así que distribuirlos en el mismo archivo es
 agregación y no cambia la licencia de lo demás. Lo que la GPL sí obliga, y está
 hecho: su texto viaja adentro del paquete, y **cada release lleva adjunta la
-fuente exacta del `awg` que distribuye**, que arma
-[`tools/fetch-sources.sh`](tools/fetch-sources.sh).
+fuente exacta del `awg` que distribuye** — el tarball del tag del que se
+compiló, con su `SHA256` y el `BUILDINFO` de la máquina que lo compiló, que deja
+[`tools/build-awg-freebsd.sh`](tools/build-awg-freebsd.sh).
+
+Desde 3.x ese binario lo compilamos nosotros y no sale del port de FreeBSD, que
+sigue en 2.0. Lleva **una** modificación, declarada en el `NOTICE`: deja afuera
+el camino de IPC por kernel, que no compila en 3.x y que en pfSense no se usa.
 
 Qué cubre a qué, pieza por pieza: [NOTICE](NOTICE). El porqué de la elección, la
 cadena verificada del binario a su fuente y el checklist de cada release:
