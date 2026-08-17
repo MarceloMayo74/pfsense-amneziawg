@@ -201,21 +201,35 @@ Tres cosas, ninguna prevista:
    `IPC_SUPPORTS_KERNEL_INTERFACE`. **Vale la pena reportarlo upstream**, como
    se hizo con sticky sockets.
 
-#### Lo que sí hay que resolver antes de empaquetar
+#### La bajada: medida, no supuesta
 
-**El SIGTERM de 3.1 no se lleva la interfaz.** En 2.0, mandarle SIGTERM al
-proceso bajaba el túnel entero: desaparecían la interfaz y el `.sock` (era el
-hallazgo de la fase 4 del bring-up original). Con 3.1, `spike/verify-sticky.sh`
-deja `tun9099` levantada y el socket en `run_path` después del SIGTERM. Y una
-interfaz que queda dando vueltas es cara: un `ifconfig destroy` que se cruza con
-un daemon arrancando la deja **colgada en estado D**, imposible de matar, y de
-ahí no se sale sin reiniciar.
+Durante las pruebas pareció que 3.1 dejaba de limpiar al recibir SIGTERM. **Es
+falso**, y la confusión salió cara, así que queda la medición. En la VM, con el
+binario 3.1 y arrancando y bajando **igual que el paquete** —`daemon -p` para
+arrancar, y para parar el PID que sale del pidfile o, si no sirve, de
+`pgrep -f "<awg_go> <if>$"`—:
 
-Hay que mirarlo antes de armar el `.pkg`: si `awg_proc_stop()` ya no alcanza,
-el camino de bajada tiene que destruir la interfaz y borrar el socket él mismo
-—y con cuidado del orden, porque el race es real—. Ojo que en el bring-up de
-dos túneles la bajada sí funcionó, así que no es que 3.1 nunca limpie: falta
-entender la diferencia.
+| señal | proceso | socket | interfaz |
+|---|---|---|---|
+| SIGTERM | se va | se va | se va |
+| SIGKILL | se va | **queda** | **queda** |
+
+Es exactamente la matriz de 2.0 que ya estaba anotada en `awg_proc_pid()`.
+`awg_proc_stop()` no necesita ningún cambio, y `awg_proc_reap()` sigue siendo lo
+que cubre el caso del SIGKILL y el de un proceso que se cayó solo.
+
+Lo que sí se vio de verdad, y conviene no repetir: **una interfaz que quedó
+levantada es cara**. Un `ifconfig destroy` que se cruza con un daemon arrancando
+sobre esa misma interfaz la deja colgada en **estado D**, con procesos
+imposibles de matar, y arrastra a cualquier `pkg delete` que intente bajarla
+(`Unable to access interface tunNNNN: Protocol error`). Se destraba matando lo
+que quedó agarrado, no insistiendo con el destroy. `awg_proc_reap()` ya evita
+ese cruce por diseño: solo destruye si el proceso no está corriendo.
+
+Detalle menor que apareció: el pidfile de `daemon -p` **siempre queda vacío**,
+porque amneziawg-go se demoniza solo y el hijo directo de `daemon(8)` se va
+enseguida. O sea que en la práctica el PID lo encuentra siempre el `pgrep` de
+respaldo. Es así desde 2.0, no lo cambió 3.1.
 
 Tareas que quedan:
 
