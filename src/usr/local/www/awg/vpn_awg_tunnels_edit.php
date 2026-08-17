@@ -954,20 +954,41 @@ events.push(function() {
 	var awgHpMin = <?=(int) $awgg['header_protection_min_padding']?>;
 
 	function awgEnsurePadding() {
-		if (parseInt($('#awgversion').val(), 10) < 3) {
-			return;
-		}
-
-		if ($('#headerprotectionkey').val().trim() === '') {
-			return;
-		}
+		var aplica = (parseInt($('#awgversion').val(), 10) >= 3) &&
+			     ($('#headerprotectionkey').val().trim() !== '');
 
 		$.each(['s1', 's2', 's3', 's4'], function(i, field) {
 			var $input = $('#' + field);
 
-			if ($input.length && (($input.val().trim() === '') ||
-			    (parseInt($input.val(), 10) < awgHpMin))) {
-				$input.val(awgHpMin);
+			if (!$input.length) {
+				return;
+			}
+
+			var valor = $input.val().trim();
+
+			if (aplica) {
+				if ((valor === '') || (parseInt(valor, 10) < awgHpMin)) {
+					/*
+					 * Se guarda lo que habia para poder devolverlo: subirlo es
+					 * cosa nuestra, asi que bajarlo tambien tiene que serlo.
+					 */
+					$input.data('awgPrev', valor);
+					$input.val(awgHpMin);
+				}
+
+				return;
+			}
+
+			/*
+			 * Ya no hace falta. Se devuelve el valor anterior, pero solo si el
+			 * campo sigue teniendo EXACTAMENTE lo que pusimos: si el usuario lo
+			 * cambio despues, ese numero es suyo y no se toca.
+			 */
+			var previo = $input.data('awgPrev');
+
+			if ((previo !== undefined) && (parseInt(valor, 10) === awgHpMin)) {
+				$input.val(previo);
+				$input.removeData('awgPrev');
 			}
 		});
 	}
