@@ -359,7 +359,7 @@ executed by php_awg". Se pasa la entrada por archivo o por variable de entorno.
    21-07**, anterior a esos commits. O sea: el soporte está escrito y sin
    publicar, no ausente. Hasta que salgan esas releases, 3.x es
    firewall-a-firewall o hay que compilar el cliente.
-2. **El corte exacto 3.0 vs 3.1.** El clon de `reference/amneziawg-tools` está
-   aplastado en un solo commit, así que no se pudo diffear `v3.0.20260805`
-   contra `v3.1.20260812`. La tabla de arriba sigue lo que ya decía el
-   comentario de `awg_globals.inc`; se confirma con un `git fetch` del tag 3.0.
+2. ~~**El corte exacto 3.0 vs 3.1.**~~ **Confirmado el 17-08-2026** con un
+   `git fetch` del tag `v3.0.20260805`: diffeando los `key_match()` de los dos
+   `config.c`, 3.1 agrega exactamente `RandomTrailers` y `DisableCookies` sobre
+   3.0, que es como está la tabla.
