@@ -5,17 +5,20 @@
 #
 # Que hace, y por que asi:
 #
-#  - Parte del tag v0.2.16 del clon de reference/, que es EXACTAMENTE la
-#    version que empaqueta el port de FreeBSD (su version.go dice 0.0.20250522,
-#    igual que el binario que veniamos distribuyendo). El unico delta contra lo
-#    ya validado es el parche.
+#  - Parte de un tag del clon de reference/, extraido con git archive. Hoy es
+#    v3.1.20260814, la rama 3.1 del protocolo (docs/plan-amneziawg-3.0.md); el
+#    binario que se venia distribuyendo salia de v0.2.16, que es 2.0. El salto
+#    es compatible hacia atras: sin las claves de 3.x en el .conf, el backend
+#    emite los mismos bytes que antes.
 #  - No toca reference/: extrae el tag con git archive a un directorio de
 #    trabajo en .tools/ y copia encima los archivos de patches/amneziawg-go/.
 #  - Compila sin CGO, asi que no hace falta ninguna toolchain de FreeBSD: el
 #    binario es Go puro y la ABI de syscalls de FreeBSD es estable. El mismo
 #    binario sirve para FreeBSD 15 y 16.
-#  - Marca la version como 0.0.20250522-sticky1 para poder distinguir a simple
-#    vista un binario parcheado de uno de fabrica.
+#  - Marca la version con el tag del que salio mas -sticky1, para distinguir a
+#    simple vista un binario parcheado de uno de fabrica. No se puede usar el
+#    numero de fabrica: upstream dejo version.go clavado en "0.0.20250522"
+#    hasta en el tag 3.1, asi que no dice nada.
 
 #  - Con -Test deja tambien .tools\sticky.test, el binario de tests del paquete
 #    conn compilado para FreeBSD. Hay que correrlo EN EL FIREWALL: verifica
@@ -33,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 
 $repo   = Split-Path -Parent $PSScriptRoot
 $goExe  = Join-Path $repo '.tools\go\bin\go.exe'
-$srcTag = 'v0.2.16'
+$srcTag = 'v3.1.20260814'
 $work   = Join-Path $repo '.tools\awg-go-build'
 $ref    = Join-Path $repo 'reference\amneziawg-go'
 
@@ -71,9 +74,17 @@ Copy-Item (Join-Path $patches 'controlfns_freebsd.go')  (Join-Path $work 'conn\'
 Copy-Item (Join-Path $patches 'sticky_default.go')      (Join-Path $work 'conn\') -Force
 Copy-Item (Join-Path $patches 'sticky_freebsd_test.go') (Join-Path $work 'conn\') -Force
 
-# La marca de version: un binario parcheado se tiene que poder reconocer
+# La marca de version: un binario parcheado se tiene que poder reconocer, y el
+# numero que trae version.go no sirve para eso -- sigue diciendo "0.0.20250522"
+# hasta en el tag 3.1. Se estampa el tag del que salio.
 $versionFile = Join-Path $work 'version.go'
-(Get-Content $versionFile) -replace '"(0\.0\.\d+)"', '"$1-sticky1"' | Set-Content -Encoding ascii $versionFile
+$stamp       = ($srcTag -replace '^v', '') + '-sticky1'
+
+# Ojo: -match sobre un array devuelve los elementos que matchean, no un
+# booleano, asi que la comprobacion va sobre el texto entero.
+$stamped = (Get-Content $versionFile) -replace 'const Version = ".*"', "const Version = `"$stamp`""
+if (($stamped -join "`n") -notmatch [regex]::Escape($stamp)) { throw "no se pudo estampar la version en version.go" }
+$stamped | Set-Content -Encoding ascii $versionFile
 
 # --- compilar ------------------------------------------------------------
 $env:GOOS        = 'freebsd'
