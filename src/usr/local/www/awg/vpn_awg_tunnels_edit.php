@@ -117,6 +117,16 @@ if ($_POST) {
 				exit;
 				break;
 
+			/*
+			 * La clave de proteccion de headers va aparte del sorteo general
+			 * porque es un secreto compartido: el boton de sortear no la puede
+			 * tocar sin dejar afuera a los clientes ya entregados.
+			 */
+			case 'genhpk':
+				print(awg_gen_header_protection_key());
+				exit;
+				break;
+
 			case 'genjunk':
 				$payloads = array();
 
@@ -192,8 +202,19 @@ if (is_numericint($tun_idx) && is_array(config_get_path("installedpackages/amnez
 	 * boton.
 	 */
 	if (!$_POST) {
-		$pconfig = array_merge($pconfig,
-				       awg_gen_obfuscation(awg_version_ceiling()));
+		$level = awg_version_ceiling();
+
+		$pconfig = array_merge($pconfig, awg_gen_obfuscation($level));
+
+		/*
+		 * La clave de proteccion de headers no sale del sorteo general --es un
+		 * secreto compartido, no un parametro-- pero un tunel nuevo si tiene
+		 * que nacer con una: es lo unico de 3.0 que da una ganancia clara, y
+		 * nadie tiene todavia un .conf que se pueda invalidar.
+		 */
+		if ($level >= 3) {
+			$pconfig['headerprotectionkey'] = awg_gen_header_protection_key();
+		}
 	}
 }
 
@@ -410,7 +431,7 @@ $form->add($section);
 /*
  * Ofuscacion.
  *
- * Los 16 parametros que separan AmneziaWG de WireGuard. La criptografia es la
+ * Los parametros que separan AmneziaWG de WireGuard: 16 hasta 2.0, 25 con 3.1. La criptografia es la
  * misma; esto cambia la forma de los paquetes para que un DPI no reconozca el
  * handshake por su firma.
  */
@@ -434,6 +455,8 @@ $awg_version     = awg_tunnel_version($pconfig, $ceiling);
 
 // Los campos que existen en la pagina, que es cosa del techo y no de lo elegido.
 $awg2 = ($ceiling >= 2);
+$awg3 = ($ceiling >= 3);
+$awg4 = ($ceiling >= 4);
 
 $version_options = array();
 
@@ -645,6 +668,112 @@ if ($awg2) {
 	  ->setHelp('Fills the five with freshly drawn templates. There is no factory template and there will not be one: the same bytes leaving every installation of this package would be a better signature than the one being hidden. For the same reason the examples in Amnezia\'s documentation are not used — they are published.');
 }
 
+/*
+ * Lo que estrena 3.0. Mismo criterio que arriba: se dibujan si el FIREWALL
+ * llega, y el selector los muestra o los esconde sin volver al servidor.
+ */
+if ($awg3) {
+	/*
+	 * La clave de proteccion de headers es lo unico de 3.0 que da una ganancia
+	 * clara: sin ella el tipo de mensaje viaja en claro y un DPI lo lee. Pero
+	 * es un secreto COMPARTIDO, asi que tiene boton propio y no entra en el
+	 * sorteo general -- rehacerla deja afuera a todos los clientes que ya
+	 * tienen su .conf.
+	 */
+	$group = new Form_Group('Header Protection');
+
+	$group->add(new Form_Input(
+		'headerprotectionkey',
+		'HeaderProtectionKey',
+		'text',
+		$pconfig['headerprotectionkey'] ?? ''
+	))->addClass('trim')
+	  ->setHelp('HeaderProtectionKey — a 32-byte key in base64')
+	  ->setWidth(7);
+
+	$group->addClass('awg-v3-only');
+
+	$section->add($group);
+
+	$section->addInput(new Form_Button(
+		'genhpk',
+		'New key',
+		null,
+		'fa-solid fa-key'
+	))->addClass('btn-primary btn-sm awg-v3-only')
+	  ->setHelp('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.');
+
+	$group = new Form_Group('Content Padding');
+
+	$group->add(new Form_Input(
+		'contentpaddingaddition',
+		'ContentPaddingAddition',
+		'text',
+		$pconfig['contentpaddingaddition'] ?? ''
+	))->addClass('trim')
+	  ->setHelp('ContentPaddingAddition — bytes, or a range such as 12-40')
+	  ->setWidth(3);
+
+	$group->addClass('awg-v3-only')
+	      ->setHelp(gettext('Extra bytes added to <b>every data packet</b>, not just the handshake, so this one is paid for in throughput and MTU — the same trade S4 makes. Empty means the backend adds nothing.'));
+
+	$section->add($group);
+
+	/*
+	 * Los cinco tiempos del protocolo. Hasta 2.0 eran constantes compiladas;
+	 * 3.0 los deja elegir para que el ritmo del tunel deje de ser reconocible.
+	 * Vacios significa los de fabrica, que es lo que hace todo el mundo.
+	 */
+	$group = new Form_Group('Protocol Timings');
+
+	foreach (array(
+		'rekeyaftertime'	=> array('RekeyAfterTime', 'rekey after'),
+		'rekeytimeout'		=> array('RekeyTimeout', 'handshake retry'),
+		'rejectaftertime'	=> array('RejectAfterTime', 'session expiry'),
+		'keepalivetimeout'	=> array('KeepaliveTimeout', 'keepalive'),
+		'maxhandshakeattempts'	=> array('MaxHandshakeAttempts', 'attempts')) as $field => $meta) {
+		$group->add(new Form_Input(
+			$field,
+			$meta[0],
+			'text',
+			$pconfig[$field] ?? ''
+		))->addClass('trim')
+		  ->setHelp(sprintf('%1$s — %2$s', $meta[0], $meta[1]))
+		  ->setWidth(2);
+	}
+
+	$group->addClass('awg-v3-only')
+	      ->setHelp(gettext('Seconds, or a range such as 100-140; the last one is a count. <b>Both ends must agree</b>, and leaving them empty keeps WireGuard\'s own values — which is what everyone else uses, so changing them is only worth it when the timing itself is what gives the tunnel away.'));
+
+	$section->add($group);
+}
+
+/*
+ * Los dos booleanos de 3.1. Van como selector de tres estados y no como
+ * checkbox: vacio no es lo mismo que off. Vacio deja la clave fuera del .conf
+ * --y un cliente 3.0 la rechazaria entera-- mientras que off la escribe.
+ */
+if ($awg4) {
+	$group = new Form_Group('AmneziaWG 3.1');
+
+	foreach (array(
+		'randomtrailers' => array('RandomTrailers', 'random trailing bytes'),
+		'disablecookies' => array('DisableCookies', 'no cookie replies')) as $field => $meta) {
+		$group->add(new Form_Select(
+			$field,
+			$meta[0],
+			$pconfig[$field] ?? '',
+			array('' => gettext('not written'), 'on' => gettext('on'), 'off' => gettext('off'))
+		))->setHelp(sprintf('%1$s — %2$s', $meta[0], $meta[1]))
+		  ->setWidth(3);
+	}
+
+	$group->addClass('awg-v4-only')
+	      ->setHelp(gettext('Both ends must agree. Left as <i>not written</i> the key stays out of both configuration files, which is what an AmneziaWG 3.0 client needs — it rejects the whole file over a key it does not know.'));
+
+	$section->add($group);
+}
+
 $form->add($section);
 
 /*
@@ -656,17 +785,21 @@ $form->add($section);
  * Bajar el selector NO borra nada, por la misma razon: los campos se esconden y
  * dejan de escribirse, pero siguen ahi si mañana se vuelve a subir. Lo que
  * garantiza que no se escriban es awg_obfuscation_pairs(), no esta pantalla.
+ *
+ * El unico filtro es el nivel del campo contra el techo. Antes esto colgaba
+ * ademas de un `if (!$awg2)`, que con una tabla que llegaba hasta 2.0 daba lo
+ * mismo --con el techo en 2 no habia nada arriba que preservar-- y con los
+ * campos de 3.x pasaba a borrarlos: un firewall en 2.0 editando un tunel que
+ * traia valores de 3.0 los perdia sin decir nada.
  */
-if (!$awg2) {
-	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
-		if ($spec['version'] > $ceiling) {
-			$form->addGlobal(new Form_Input(
-				$field,
-				'',
-				'hidden',
-				$pconfig[$field]
-			));
-		}
+foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+	if ($spec['version'] > $ceiling) {
+		$form->addGlobal(new Form_Input(
+			$field,
+			'',
+			'hidden',
+			$pconfig[$field] ?? ''
+		));
 	}
 }
 
@@ -810,19 +943,26 @@ events.push(function() {
 	 * 1.x-- y entonces esto no hace nada, que es lo correcto.
 	 */
 	function awgApplyVersion() {
-		var below2 = (parseInt($('#awgversion').val(), 10) < 2);
+		var level  = parseInt($('#awgversion').val(), 10);
+		var below2 = (level < 2);
+		var below3 = (level < 3);
+		var below4 = (level < 4);
 
 		hideGroupInput('s3', below2);
 		hideGroupInput('s4', below2);
 		hideClass('awg-v2-only', below2);
 		hideInput('genjunk', below2);
+
+		hideClass('awg-v3-only', below3);
+		hideInput('genhpk', below3);
+		hideClass('awg-v4-only', below4);
 	}
 
 	$('#awgversion').change(awgApplyVersion);
 	awgApplyVersion();
 
 	// Botones de accion, no de submit: sin esto guardan el tunel.
-	$('#genobf, #genjunk').prop('type', 'button');
+	$('#genobf, #genjunk, #genhpk').prop('type', 'button');
 
 	/*
 	 * El sorteo va al servidor en vez de hacerse en javascript por dos razones:
@@ -856,6 +996,28 @@ events.push(function() {
 				for (var field in gen) {
 					$('#' + field).val(gen[field]);
 				}
+			}
+		});
+	});
+
+	/*
+	 * La clave nueva se pide y se pone, pero se avisa antes: es un secreto
+	 * compartido y cambiarlo deja afuera a los clientes que ya tienen su .conf.
+	 * El aviso va aca y no en el texto de ayuda porque el texto se lee despues
+	 * de apretar.
+	 */
+	$('#genhpk').click(function(event) {
+		if ($('#headerprotectionkey').val().trim() !== '' &&
+		    !confirm('This tunnel already has a header protection key. Drawing a new one will lock out every client whose configuration file was already handed over. Continue?')) {
+			return;
+		}
+
+		$.ajax({
+			url: '/awg/vpn_awg_tunnels_edit.php',
+			type: 'post',
+			data: {act: 'genhpk'},
+			success: function(response) {
+				$('#headerprotectionkey').val(response);
 			}
 		});
 	});

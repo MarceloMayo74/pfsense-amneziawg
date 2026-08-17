@@ -45,15 +45,16 @@ if (!function_exists('gettext')) {
 // Los rangos y la mascara salen del globals de verdad, no de una copia.
 $globals = file_get_contents("{$src}/awg_globals.inc");
 
-preg_match("/'obfuscation_fields'.*?'i5'.*?\)\),/s", $globals, $fields);
+preg_match("/'obfuscation_fields'.*?'disablecookies'.*?\)\),/s", $globals, $fields);
 preg_match("/'header_mask'\s*=>\s*'([^']+)'/", $globals, $mask);
+preg_match("/'range_mask'\s*=>\s*'([^']+)'/", $globals, $range_mask);
 
-if (empty($fields) || empty($mask)) {
-	fwrite(STDERR, "No se pudieron leer obfuscation_fields/header_mask de awg_globals.inc\n");
+if (empty($fields) || empty($mask) || empty($range_mask)) {
+	fwrite(STDERR, "No se pudieron leer obfuscation_fields/header_mask/range_mask de awg_globals.inc\n");
 	exit(2);
 }
 
-preg_match("/'awg_versions'.*?'label' => 'AmneziaWG 3\.0'.*?\)\),/s", $globals, $versions);
+preg_match("/'awg_versions'.*?'label' => 'AmneziaWG 3\.1'.*?\)\),/s", $globals, $versions);
 
 if (empty($versions)) {
 	fwrite(STDERR, "No se pudieron leer awg_versions de awg_globals.inc
@@ -62,7 +63,7 @@ if (empty($versions)) {
 }
 
 eval('$awgg = array(' . rtrim($fields[0], ',') . ', ' . rtrim($versions[0], ',') .
-     ", 'header_mask' => '{$mask[1]}');");
+     ", 'header_mask' => '{$mask[1]}', 'range_mask' => '{$range_mask[1]}');");
 
 /*
  * El techo depende de una sonda al backend, que fuera del firewall no existe.
@@ -97,11 +98,15 @@ function check($name, $cond, $detail = '') {
 	}
 }
 
-// Un $pconfig real trae las 16 claves, aunque esten vacias.
+// Un $pconfig real trae las 25 claves, aunque esten vacias.
 function pc($over = array()) {
 	$base = array_fill_keys(array('jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4',
 				      'h1', 'h2', 'h3', 'h4',
-				      'i1', 'i2', 'i3', 'i4', 'i5'), '');
+				      'i1', 'i2', 'i3', 'i4', 'i5',
+				      'headerprotectionkey', 'contentpaddingaddition',
+				      'rekeyaftertime', 'rekeytimeout', 'rejectaftertime',
+				      'keepalivetimeout', 'maxhandshakeattempts',
+				      'randomtrailers', 'disablecookies'), '');
 
 	return array_merge($base, $over);
 }
@@ -166,6 +171,39 @@ check('s3 con valor valido pasa', n(array('s3' => '20')) === 0, json_encode(errs
 check('s3 fuera de rango falla',  n(array('s3' => '2000')) === 1);
 check('i1 es texto libre',        n(array('i1' => '<b 0xf1>')) === 0, json_encode(errs(array('i1' => '<b 0xf1>'))));
 
+echo "\n=== los rangos u16 de 3.0 ===\n";
+check('un valor suelto vale',      n(array('contentpaddingaddition' => '20')) === 0,
+      json_encode(errs(array('contentpaddingaddition' => '20'))));
+check('un rango con guion vale',   n(array('contentpaddingaddition' => '12-40')) === 0);
+check('cero vale: es "no toques nada"', n(array('contentpaddingaddition' => '0')) === 0);
+check('65535 vale, es el borde',   n(array('rekeyaftertime' => '65535')) === 0);
+check('65536 se rechaza',          n(array('rekeyaftertime' => '65536')) === 1);
+check('un rango al reves se rechaza', n(array('rekeytimeout' => '40-12')) === 1);
+check('un decimal se rechaza',     n(array('keepalivetimeout' => '12.5')) === 1);
+check('basura se rechaza',         n(array('maxhandshakeattempts' => 'muchas')) === 1);
+
+echo "\n=== la clave de proteccion de headers ===\n";
+$clave_ok = base64_encode(str_repeat("\x41", 32));
+
+check('32 bytes en base64 valen', n(array('headerprotectionkey' => $clave_ok)) === 0,
+      json_encode(errs(array('headerprotectionkey' => $clave_ok))));
+check('31 bytes se rechazan',
+      n(array('headerprotectionkey' => base64_encode(str_repeat("\x41", 31)))) === 1);
+check('33 bytes se rechazan, aunque midan 44 caracteres',
+      n(array('headerprotectionkey' => base64_encode(str_repeat("\x41", 33)))) === 1);
+check('texto que no es base64 se rechaza',
+      n(array('headerprotectionkey' => 'esto no es una clave')) === 1);
+check('44 caracteres que no decodifican a 32 bytes se rechazan',
+      n(array('headerprotectionkey' => str_repeat('!', 44))) === 1);
+
+echo "\n=== los booleanos de 3.1 ===\n";
+check('on vale',            n(array('randomtrailers' => 'on')) === 0);
+check('off vale',           n(array('disablecookies' => 'off')) === 0);
+check('vacio vale: es "no lo escribas"', n(array('randomtrailers' => '')) === 0);
+check('true se rechaza',    n(array('randomtrailers' => 'true')) === 1);
+check('1 se rechaza',       n(array('disablecookies' => '1')) === 1);
+check('yes se rechaza',     n(array('randomtrailers' => 'yes')) === 1);
+
 echo "\n=== awg_gen_headers ===\n";
 $dupes = $out_of_range = 0;
 
@@ -221,6 +259,26 @@ check('con un backend 1.x rechaza el 2.0 que antes aceptaba',
 
 check('con un backend 1.x el 1.x sigue estando bien',
 	count(awg_validate_obfuscation(pc(array('awgversion' => '1')))) === 0);
+
+/*
+ * Y con un backend 3.1, que es donde el techo llega a lo que este paquete sabe
+ * escribir. Los cuatro escalones tienen que ser elegibles.
+ */
+$test_ceiling = 4;
+
+foreach (array('1', '2', '3', '4') as $ok) {
+	check("con techo 3.1 acepta el nivel {$ok}",
+		count(awg_validate_obfuscation(pc(array('awgversion' => $ok)))) === 0,
+		json_encode(awg_validate_obfuscation(pc(array('awgversion' => $ok)))));
+}
+
+check('con techo 3.1 el 5 sigue sin existir',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '5')))) === 1);
+
+$test_ceiling = 3;
+
+check('con un backend 3.0 se rechaza el 3.1',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '4')))) === 1);
 
 $test_ceiling = 2;
 

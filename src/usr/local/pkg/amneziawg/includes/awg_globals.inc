@@ -176,7 +176,7 @@ $awgg = array(
 
 	/*
 	 * El QR se dibuja a 400 px y se descarga a 512. Nivel de correccion 'L'
-	 * porque el .conf de AmneziaWG es largo -- lleva 16 parametros mas que uno
+	 * porque el .conf de AmneziaWG es largo -- lleva hasta 25 parametros mas que uno
 	 * de WireGuard-- y mas correccion significa mas modulos, o sea un codigo
 	 * mas denso y mas dificil de leer con la camara. Los 4 modulos de zona
 	 * tranquila los pide el estandar; sin ellos hay lectores que no encuentran
@@ -207,16 +207,23 @@ $awgg = array(
 	'max_tunnels'				=> 1000,
 
 	/*
-	 * Los 16 parametros de ofuscacion. Todos van en [Interface]: ninguno es
-	 * por peer. Los rangos salen del modelo de datos del plugin de OPNsense.
+	 * Los 25 parametros de ofuscacion. Todos van en [Interface]: ninguno es
+	 * por peer. Los rangos de 1.x y 2.0 salen del modelo de datos del plugin de
+	 * OPNsense; los de 3.x, del config.c de amneziawg-tools.
 	 *
 	 * Ojo con H1-H4: son TEXTO, no enteros. Admiten un valor suelto o un
 	 * rango con guion (787134324-1593815189). Modelarlos como campo numerico
-	 * los rompe en silencio contra configuraciones reales.
+	 * los rompe en silencio contra configuraciones reales. Los seis campos de
+	 * 3.0 que son 'range' tienen la misma forma, pero en 16 bits.
+	 *
+	 * 'key' es el nombre de la clave en el .conf. Solo hace falta cuando no es
+	 * el nombre del campo capitalizado: jc da Jc y s1 da S1, pero
+	 * contentpaddingaddition daria Contentpaddingaddition, que awg(8) no
+	 * reconoce -- y una clave que no reconoce le hace abortar el archivo entero.
 	 *
 	 * 'version' es el nivel de AmneziaWG que hace falta para entender el campo.
 	 * Contra un backend --o un cliente-- de un nivel menor no deben escribirse
-	 * en el .conf: awg(8) aborta el archivo entero ante una clave que no conoce.
+	 * en el .conf, por lo mismo.
 	 */
 	'obfuscation_fields'	=> array(
 		'jc'   => array('type' => 'int',  'min' => 1, 'max' => 128,  'version' => 1),
@@ -234,7 +241,22 @@ $awgg = array(
 		'i2'   => array('type' => 'text', 'version' => 2),
 		'i3'   => array('type' => 'text', 'version' => 2),
 		'i4'   => array('type' => 'text', 'version' => 2),
-		'i5'   => array('type' => 'text', 'version' => 2)),
+		'i5'   => array('type' => 'text', 'version' => 2),
+
+		// 3.0: la clave de proteccion de headers y el relleno de contenido
+		'headerprotectionkey'	=> array('type' => 'key',   'key' => 'HeaderProtectionKey',    'version' => 3),
+		'contentpaddingaddition'=> array('type' => 'range', 'key' => 'ContentPaddingAddition', 'min' => 0, 'max' => 65535, 'version' => 3),
+
+		// 3.0: los tiempos del protocolo, que hasta 2.0 eran constantes
+		'rekeyaftertime'	=> array('type' => 'range', 'key' => 'RekeyAfterTime',       'min' => 0, 'max' => 65535, 'version' => 3),
+		'rekeytimeout'		=> array('type' => 'range', 'key' => 'RekeyTimeout',         'min' => 0, 'max' => 65535, 'version' => 3),
+		'rejectaftertime'	=> array('type' => 'range', 'key' => 'RejectAfterTime',      'min' => 0, 'max' => 65535, 'version' => 3),
+		'keepalivetimeout'	=> array('type' => 'range', 'key' => 'KeepaliveTimeout',     'min' => 0, 'max' => 65535, 'version' => 3),
+		'maxhandshakeattempts'	=> array('type' => 'range', 'key' => 'MaxHandshakeAttempts', 'min' => 0, 'max' => 65535, 'version' => 3),
+
+		// 3.1: los dos booleanos, que se escriben on/off y no 1/0
+		'randomtrailers'	=> array('type' => 'bool',  'key' => 'RandomTrailers',       'version' => 4),
+		'disablecookies'	=> array('type' => 'bool',  'key' => 'DisableCookies',       'version' => 4)),
 
 	/*
 	 * Los niveles de AmneziaWG, que es lo que elige el selector del tunel.
@@ -250,6 +272,12 @@ $awgg = array(
 	 * timings RekeyAfterTime, RekeyTimeout, RejectAfterTime, KeepaliveTimeout y
 	 * MaxHandshakeAttempts; 3.1 suma RandomTrailers y DisableCookies, los dos
 	 * booleanos. Estan leidos del config.c de las tools, no de la doc.
+	 *
+	 * 3.0 y 3.1 son escalones separados a proposito, aunque el mismo binario
+	 * entienda los dos: un cliente 3.0 rechaza el .conf entero al ver
+	 * RandomTrailers, exactamente como uno de 1.x lo rechaza al ver S3. El
+	 * escalon existe para poder decir "hasta aca entiende el otro extremo", no
+	 * para describir el backend.
 	 */
 	'awg_versions'	=> array(
 		1 => array(
@@ -260,24 +288,23 @@ $awgg = array(
 			'descr' => 'Agrega S3, S4 e I1-I5. Es lo que entiende la app estable de Android (2.0.x).'),
 		3 => array(
 			'label' => 'AmneziaWG 3.0',
-			'descr' => 'Agrega relleno de contenido, proteccion de headers y los timings.')),
+			'descr' => 'Agrega relleno de contenido, proteccion de headers y los timings.'),
+		4 => array(
+			'label' => 'AmneziaWG 3.1',
+			'descr' => 'Agrega los dos booleanos: colas al azar y cookies apagadas.')),
 
 	/*
 	 * Hasta que nivel sabe escribir ESTE paquete, que es una cosa distinta de
-	 * hasta donde llega el backend. Hoy son 2 por dos razones independientes: el
-	 * awg que va adentro del .pkg no conoce ninguna clave de 3.0, y los campos
-	 * de 3.0 no estan implementados aca. Ofrecer un nivel que no se puede probar
-	 * seria publicar soporte que nadie verifico.
-	 *
-	 * Subirlo a 3 es: agregar esos campos a obfuscation_fields con
-	 * 'version' => 3, dibujarlos en la pagina del tunel, y cambiar este 2 por un
-	 * 3. Todo lo demas --deteccion, filtrado al escribir, validacion, el
-	 * selector-- ya cuenta hasta 3.
+	 * hasta donde llega el backend instalado. El techo real es el minimo de los
+	 * dos, y lo calcula awg_version_ceiling().
 	 */
-	'awg_version_implemented'	=> 2,
+	'awg_version_implemented'	=> 4,
 
 	// Un valor suelto, o un rango 'desde-hasta'.
 	'header_mask'		=> '/^\d{1,10}(-\d{1,10})?$/',
+
+	// Lo mismo pero en 16 bits, que es la forma de los campos 'range' de 3.0.
+	'range_mask'		=> '/^\d{1,5}(-\d{1,5})?$/',
 
 	/*
 	 * Valores de referencia, y nada mas que eso: se muestran como placeholder

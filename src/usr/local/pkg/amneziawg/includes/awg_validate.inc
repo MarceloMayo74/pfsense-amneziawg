@@ -167,7 +167,7 @@ function awg_validate_tunnel_post($pconfig, $idx_from_post) {
 }
 
 /*
- * Valida los 16 parametros de ofuscacion.
+ * Valida los parametros de ofuscacion, sean los 16 de 2.0 o los 25 de 3.1.
  *
  * Se valida el rango de todos los campos siempre, sin importar el nivel elegido
  * ni el del backend. Lo que NO se hace es rechazar un campo por estar arriba de
@@ -307,9 +307,10 @@ function awg_validate_obfuscation($pconfig) {
 	}
 
 	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
-		$value = trim((string) $pconfig[$field]);
+		$value = trim((string) ($pconfig[$field] ?? ''));
 
-		$label = ucfirst($field);
+		// El nombre con el que el usuario lo ve, que es el del .conf
+		$label = $spec['key'] ?? ucfirst($field);
 
 		// Todos son opcionales
 		if ($value === '') {
@@ -361,6 +362,63 @@ function awg_validate_obfuscation($pconfig) {
 
 				if ($why !== '') {
 					$input_errors[] = sprintf('%1$s: %2$s', $label, $why);
+				}
+				break;
+
+			/*
+			 * Los rangos de 3.0. Misma forma que H1-H4 pero en 16 bits, y aca
+			 * el minimo si es cosmetico: cero significa "no lo toques", que es
+			 * justo lo que hace el backend con el campo vacio.
+			 */
+			case 'range':
+				if (!preg_match($awgg['range_mask'], $value)) {
+					$input_errors[] = sprintf(
+						gettext('%s must be a number, or a hyphenated range such as 12-40.'),
+						$label);
+					break;
+				}
+
+				[$lo, $hi] = awg_header_bounds($value);
+
+				if ($hi < $lo) {
+					$input_errors[] = sprintf(
+						gettext('%s has its range reversed: the lower bound cannot be greater than the upper bound.'),
+						$label);
+					break;
+				}
+
+				if (($lo < $spec['min']) || ($hi > $spec['max'])) {
+					$input_errors[] = sprintf(
+						gettext('%1$s must be between %2$s and %3$s.'),
+						$label, $spec['min'], $spec['max']);
+				}
+				break;
+
+			/*
+			 * La clave de proteccion de headers: 32 bytes en base64, la misma
+			 * forma que una clave de WireGuard. Se valida el largo decodificado
+			 * y no la longitud del texto, porque base64 admite escrituras que
+			 * miden 44 caracteres y no decodifican a 32 bytes.
+			 */
+			case 'key':
+				$raw = base64_decode($value, true);
+
+				if (($raw === false) || (strlen($raw) !== 32)) {
+					$input_errors[] = sprintf(
+						gettext('%s must be a 32-byte key in base64, the same shape as a WireGuard key.'),
+						$label);
+				}
+				break;
+
+			/*
+			 * Los booleanos de 3.1. Se guardan y se escriben tal cual: awg(8)
+			 * los parsea con parse_bool(), que quiere on/off.
+			 */
+			case 'bool':
+				if (!in_array($value, array('on', 'off'), true)) {
+					$input_errors[] = sprintf(
+						gettext('%s must be either on or off.'),
+						$label);
 				}
 				break;
 		}

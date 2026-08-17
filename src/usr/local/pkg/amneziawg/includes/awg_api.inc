@@ -684,9 +684,10 @@ function awg_backend_knows_keys($lines) {
  * degrada la ofuscacion: impide que el tunel levante.
  *
  * Se prueba de arriba hacia abajo y se corta en el primero que pasa, porque los
- * niveles son acumulativos: un backend que entiende 3.0 entiende 2.0. Las
+ * niveles son acumulativos: un backend que entiende 3.1 entiende 2.0. Las
  * claves elegidas para preguntar son las que estrenan cada nivel --S3/S4 en
- * 2.0, ContentPaddingAddition en 3.0-- leidas del config.c de amneziawg-tools.
+ * 2.0, ContentPaddingAddition en 3.0, RandomTrailers en 3.1-- leidas del
+ * config.c de amneziawg-tools.
  *
  * El cache vive en run_path, que es tmpfs, asi que se revalida solo en cada
  * boot. Es lo que se quiere: sobrevive a la sesion, no a una actualizacion del
@@ -705,7 +706,9 @@ function awg_backend_version($use_cache = true) {
 
 	$version = 1;
 
-	if (awg_backend_knows_keys(array('ContentPaddingAddition = 5'))) {
+	if (awg_backend_knows_keys(array('RandomTrailers = off'))) {
+		$version = 4;
+	} else if (awg_backend_knows_keys(array('ContentPaddingAddition = 5'))) {
 		$version = 3;
 	} else if (awg_backend_knows_keys(array('S3 = 20', 'S4 = 25'))) {
 		$version = 2;
@@ -794,10 +797,11 @@ function awg_backend_supports_awg2($use_cache = true) {
  *
  * El nombre de la clave es el del campo capitalizado -- jc/jmin/s1/h1/i1 dan
  * Jc/Jmin/S1/H1/I1 -- que es exactamente como los nombra el parser de
- * amneziawg-tools.
+ * amneziawg-tools. Los campos de 3.x no siguen esa regla porque su nombre lleva
+ * varias palabras, asi que la traen escrita en 'key'.
  *
  * $ceiling se puede forzar para no pagar la sonda al backend cuando ya se conoce
- * la respuesta, y para poder testear los tres niveles sin un firewall al lado.
+ * la respuesta, y para poder testear los cuatro niveles sin un firewall al lado.
  */
 function awg_obfuscation_pairs($tunnel, $ceiling = null) {
 	global $awgg;
@@ -813,7 +817,7 @@ function awg_obfuscation_pairs($tunnel, $ceiling = null) {
 			continue;
 		}
 
-		$pairs[ucfirst($field)] = $value;
+		$pairs[$spec['key'] ?? ucfirst($field)] = $value;
 	}
 
 	return $pairs;
@@ -879,6 +883,18 @@ function awg_gen_headers() {
  * S4 queda en cero a proposito y esto no es pereza: en send.go el relleno de S4
  * entra en el camino de datos, asi que se paga en cada paquete. Ver
  * docs/amneziawg-2.0.md. Prenderlo tiene que ser una decision, no un default.
+ *
+ * De 3.x no se sortea nada, y cada cosa por su motivo:
+ *
+ *   ContentPaddingAddition  se paga por paquete de datos, igual que S4
+ *   los cinco timings       cambian el comportamiento del protocolo en los DOS
+ *                           extremos; un valor raro es mas firma que los de
+ *                           fabrica, que es lo que usa todo el mundo
+ *   HeaderProtectionKey     es un secreto compartido, no un parametro: rehacerlo
+ *                           invalida todos los .conf ya entregados de ese tunel.
+ *                           Tiene su propio generador y su propio boton, como
+ *                           I1-I5. Ver awg_gen_header_protection_key().
+ *   los dos booleanos       prenderlos es una decision, no un default
  */
 function awg_gen_obfuscation($version = 1) {
 	$jmin = random_int(40, 96);
@@ -915,6 +931,26 @@ function awg_gen_obfuscation($version = 1) {
 	}
 
 	return $gen;
+}
+
+/*
+ * Sortea una HeaderProtectionKey: 32 bytes en base64, la misma forma que una
+ * clave de WireGuard.
+ *
+ * Es la clave con la que ChaCha20 cifra el header del paquete, y es lo unico
+ * que 3.0 agrega que da una ganancia de verdad: sin ella el header sigue en
+ * claro y un DPI puede leer el tipo de mensaje.
+ *
+ * Es un SECRETO COMPARTIDO, no un parametro: tiene que ser el mismo byte a byte
+ * en los dos extremos, viaja en el .conf del cliente, y por eso no se sortea
+ * junto con lo demas en awg_gen_obfuscation(). Rehacerla invalida todos los
+ * .conf que ya se entregaron de ese tunel.
+ *
+ * random_bytes() y no una clave de curve25519: no es una clave de curva, es
+ * material simetrico, y no lleva clamping de ninguna clase.
+ */
+function awg_gen_header_protection_key() {
+	return base64_encode(random_bytes(32));
 }
 
 /*

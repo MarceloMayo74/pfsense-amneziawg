@@ -66,7 +66,7 @@ if (!function_exists('is_hostname')) {
 
 // Los campos y sus specs salen del globals de verdad.
 $globals = file_get_contents("{$src}/awg_globals.inc");
-preg_match("/'obfuscation_fields'.*?'i5'.*?\)\),/s", $globals, $fields);
+preg_match("/'obfuscation_fields'.*?'disablecookies'.*?\)\),/s", $globals, $fields);
 
 if (empty($fields)) {
 	fwrite(STDERR, "No se pudieron leer obfuscation_fields de awg_globals.inc\n");
@@ -241,6 +241,53 @@ check('un nivel guardado por encima del techo se baja al techo, no rompe',
 
 check('un nivel guardado que no existe cae al techo',
 	awg_tunnel_version(array('awgversion' => 'pepe'), 2) === 2);
+
+/*
+ * Los campos de 3.x. Lo que se prueba aca es lo unico que 3.0 rompio del diseño
+ * viejo: sus nombres NO son el campo capitalizado, asi que si el spec pierde su
+ * 'key' salen como Contentpaddingaddition y awg(8) aborta el .conf entero.
+ */
+$tunnel_3x = array_merge($tunnel, array(
+	'awgversion'		=> '4',
+	'headerprotectionkey'	=> 'QOfjW+aQKrJvIbYisIoAO2FYUEQlZ5RGxaBhbTKlaEE=',
+	'contentpaddingaddition'=> '12-40',
+	'rekeyaftertime'	=> '100',
+	'randomtrailers'	=> 'on',
+	'disablecookies'	=> 'off'));
+
+$pairs_4x = awg_obfuscation_pairs($tunnel_3x, 4);
+
+check('los nombres de 3.x salen como los espera el parser, no capitalizados',
+	isset($pairs_4x['HeaderProtectionKey'], $pairs_4x['ContentPaddingAddition'],
+	      $pairs_4x['RekeyAfterTime'], $pairs_4x['RandomTrailers']),
+	implode(',', array_keys($pairs_4x)));
+
+// Cada uno por separado: isset() con varias claves solo pide que falte UNA.
+check('y ninguno salio con el nombre viejo',
+	!isset($pairs_4x['Headerprotectionkey']) &&
+	!isset($pairs_4x['Contentpaddingaddition']) &&
+	!isset($pairs_4x['Randomtrailers']));
+
+check('un booleano en off se escribe: off no es lo mismo que vacio',
+	($pairs_4x['DisableCookies'] ?? null) === 'off');
+
+check('un tunel en 3.0 no escribe los booleanos, que son de 3.1',
+	!isset(awg_obfuscation_pairs(array_merge($tunnel_3x, array('awgversion' => '3')), 4)['RandomTrailers']),
+	implode(',', array_keys(awg_obfuscation_pairs(array_merge($tunnel_3x, array('awgversion' => '3')), 4))));
+
+check('pero si escribe lo demas de 3.0',
+	isset(awg_obfuscation_pairs(array_merge($tunnel_3x, array('awgversion' => '3')), 4)['HeaderProtectionKey']));
+
+$pairs_2x_desde_3x = awg_obfuscation_pairs($tunnel_3x, 2);
+
+check('contra un backend 2.0 no se escribe nada de 3.x',
+	!isset($pairs_2x_desde_3x['HeaderProtectionKey']) &&
+	!isset($pairs_2x_desde_3x['RandomTrailers']) &&
+	!isset($pairs_2x_desde_3x['ContentPaddingAddition']),
+	implode(',', array_keys($pairs_2x_desde_3x)));
+
+check('y lo de 2.0 se sigue escribiendo igual',
+	isset(awg_obfuscation_pairs($tunnel_3x, 2)['S3']));
 
 printf("\n-- awg_client_build_conf() --\n\n");
 

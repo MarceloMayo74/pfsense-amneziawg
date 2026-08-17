@@ -309,7 +309,7 @@ $section->addInput(new Form_Select(
 	'*Tunnel',
 	$pconfig['tun'],
 	awg_get_tun_list()
-))->setHelp("AmneziaWG tunnel for this peer. Its listen port, MTU and the 16 obfuscation parameters " .
+))->setHelp("AmneziaWG tunnel for this peer. Its listen port, MTU and the obfuscation parameters " .
 	    "are taken from it. (<a href='vpn_awg_tunnels_edit.php'>Create a New Tunnel</a>)");
 
 $section->addInput(new Form_Input(

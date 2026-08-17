@@ -522,7 +522,7 @@ function awg_do_tunnel_post($post) {
 	$pconfig['mtu']			= empty($post['mtu']) ? $awgg['default_mtu'] : $post['mtu'];
 	$pconfig['addresses']['row'] 	= awg_tunnel_addresses($post);
 
-	// Los 16 parametros de ofuscacion. Todos son de interfaz, ninguno por peer.
+	// Los parametros de ofuscacion. Todos son de interfaz, ninguno por peer.
 	foreach (array_keys($awgg['obfuscation_fields']) as $field) {
 		$pconfig[$field]	= isset($post[$field]) ? trim($post[$field]) : '';
 	}
