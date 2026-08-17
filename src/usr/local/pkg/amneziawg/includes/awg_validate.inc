@@ -444,10 +444,16 @@ function awg_validate_obfuscation($pconfig) {
 	 * Es la unica regla del backend que ata dos campos de niveles distintos, y
 	 * la que hace que S4 deje de poder ser cero: es el unico relleno que se
 	 * paga en cada paquete de datos.
+	 *
+	 * Se mira el NIVEL y no solo si el campo tiene valor: abajo de 3.0 la clave
+	 * no se escribe en ningun .conf, asi que el backend nunca ve la
+	 * combinacion. Sin ese detalle, un tunel bajado a 2.0 --con la clave
+	 * guardada, que es lo que hace el selector-- no se podia guardar hasta
+	 * subirle S4, que ahi no sirve para nada y solo cuesta MTU.
 	 */
 	$hpk = trim((string) ($pconfig['headerprotectionkey'] ?? ''));
 
-	if ($hpk !== '') {
+	if (($hpk !== '') && (awg_tunnel_version($pconfig) >= 3)) {
 		$min = $awgg['header_protection_min_padding'];
 
 		$faltan = array();

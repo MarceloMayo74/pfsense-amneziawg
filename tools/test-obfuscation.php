@@ -80,6 +80,7 @@ function awg_version_ceiling($use_cache = true) {
 }
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_headers'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_obfuscation'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_junk_payload'));
@@ -212,6 +213,10 @@ check('44 caracteres que no decodifican a 32 bytes se rechazan',
  * setconf muere con un 'Invalid argument' que no dice cual de los cuatro falto.
  */
 echo "\n=== la clave necesita lugar para su nonce ===\n";
+
+// La regla solo aplica al nivel al que la clave se escribe de verdad
+$test_ceiling = 4;
+
 check('sin S1-S4 la clave se rechaza',
       n(array('headerprotectionkey' => $clave_ok)) === 1,
       json_encode(errs(array('headerprotectionkey' => $clave_ok))));
@@ -224,9 +229,25 @@ check('con S4 en 12 justo, vale',
       json_encode(errs(array_merge(k($clave_ok), array('s4' => '12')))));
 check('sin clave, S4 en cero sigue estando bien',
       n(array('s4' => '0')) === 0);
+/*
+ * Y la otra mitad de la regla: abajo de 3.0 la clave no viaja a ningun .conf,
+ * asi que exigir relleno ahi es cobrarle MTU al usuario por nada. Un tunel
+ * bajado a 2.0 conserva la clave guardada --eso hace el selector-- y tiene que
+ * poder guardarse con S4 en cero.
+ */
+check('en un tunel 2.0 la clave guardada no exige relleno',
+      n(array_merge(k($clave_ok), array('awgversion' => '2', 's4' => '0'))) === 0,
+      json_encode(errs(array_merge(k($clave_ok), array('awgversion' => '2', 's4' => '0')))));
+check('en 1.x tampoco',
+      n(array_merge(k($clave_ok), array('awgversion' => '1', 's4' => '0'))) === 0);
+check('pero en 3.0 si',
+      n(array_merge(k($clave_ok), array('awgversion' => '3', 's4' => '0'))) === 1);
+
 check('el error nombra los campos que faltan',
       strpos(implode(' ', errs(array_merge(k($clave_ok), array('s2' => '', 's4' => '')))), 'S2, S4') !== false,
       json_encode(errs(array_merge(k($clave_ok), array('s2' => '', 's4' => '')))));
+
+$test_ceiling = 2;
 
 echo "\n=== los booleanos de 3.1 ===\n";
 check('on vale',            n(array('randomtrailers' => 'on')) === 0);
