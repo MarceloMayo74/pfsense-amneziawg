@@ -717,18 +717,34 @@ function awg_tunnel_sync_by_name($tunnel_name, $json = false) {
 			 * tomado y su socket publicado.
 			 */
 			awg_if_destroy($tunnel['name'], $cmds);
-		} elseif (awg_if_create($tunnel['name'], $cmds)) {
-			// Add the tunnel interface to the AmneziaWG interface group
-			awg_interface_update_groups($tunnel['name'], $cmds);
+		} else {
+			/*
+			 * Un parametro de ofuscacion que sale del .conf sigue vivo en el
+			 * proceso --awg(8) aplica lo que el archivo nombra y no toca el
+			 * resto-- asi que bajar de nivel obliga a rehacer el dispositivo.
+			 *
+			 * Va ANTES de crear y configurar la interfaz, no en el paso de
+			 * sincronizar: reiniciar al final tira la direccion y el estado que
+			 * los pasos de aca abajo acaban de poner, y el tunel se queda sin
+			 * IP hasta el proximo apply.
+			 */
+			if (awg_obfuscation_sync_needs_restart($tunnel['name'])) {
+				awg_proc_stop($tunnel['name'], $cmds);
+			}
 
-			// Update the addresses on the tunnel interface
-			awg_interface_update_addresses($tunnel['name'], $cmds);
+			if (awg_if_create($tunnel['name'], $cmds)) {
+				// Add the tunnel interface to the AmneziaWG interface group
+				awg_interface_update_groups($tunnel['name'], $cmds);
 
-			// Toggle the interface accordingly instead of tearing it down completely
-			awg_ifconfig_if_updown($tunnel['name'], $state, $cmds);
+				// Update the addresses on the tunnel interface
+				awg_interface_update_addresses($tunnel['name'], $cmds);
 
-			// Sync interface with AmneziaWG awg(8)
-			awg_awg_if_sync($tunnel['name'], $cmds);
+				// Toggle the interface accordingly instead of tearing it down completely
+				awg_ifconfig_if_updown($tunnel['name'], $state, $cmds);
+
+				// Sync interface with AmneziaWG awg(8)
+				awg_awg_if_sync($tunnel['name'], $cmds);
+			}
 		}
 	}
 

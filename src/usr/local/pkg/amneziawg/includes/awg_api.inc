@@ -291,7 +291,23 @@ function awg_proc_reap($if_name, &$cmds = null) {
 	if (does_interface_exist($if_name)) {
 		$cmd = "{$awgg['ifconfig']} {$s(escapeshellarg($if_name))} destroy 2>&1";
 
-		$cmds[] = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
+		$res = awg_exec($cmd, 'interface', AWG_ERROR_IF_DESTROY);
+
+		/*
+		 * Que la interfaz ya no exista no es un error: es lo que se venia a
+		 * conseguir. Y pasa seguido, porque la lista de interfaces que mira
+		 * does_interface_exist() puede traer una que el proceso acaba de
+		 * llevarse al salir. Contarlo como fallo hacia que un apply
+		 * perfectamente bueno terminara en 'There was a problem applying the
+		 * changes', con el tunel andando.
+		 */
+		if (($res['ret_code'] != 0) &&
+		    preg_grep('/does not exist/i', (array) $res['output'])) {
+			$res['ret_code'] = 0;
+			$res['errors'] = array();
+		}
+
+		$cmds[] = $res;
 
 		$reaped = true;
 	}
@@ -710,24 +726,6 @@ function awg_awg_if_sync($if_name, &$cmds = null) {
 
 	if (file_exists($conf_path)
 	    && awg_is_valid_tunnel($if_name, true)) {
-		/*
-		 * Un parametro que se saca del .conf sigue vivo en el proceso, asi
-		 * que ahi no alcanza con sincronizar: hay que rearmar el dispositivo.
-		 */
-		if (awg_obfuscation_sync_needs_restart($if_name)) {
-			$cmds[] = array(
-				'cmd'		=> "restart {$if_name}",
-				'output'	=> array(sprintf(gettext('%s drops an obfuscation parameter, which a sync cannot clear; restarting it.'), $if_name)),
-				'ret_code'	=> 0,
-				'errors'	=> array());
-
-			awg_proc_stop($if_name, $cmds);
-
-			if (!awg_proc_start($if_name, $cmds)) {
-				return false;
-			}
-		}
-
 		$cmd = "{$awgg['awg']} syncconf {$s(escapeshellarg($if_name))} {$s(escapeshellarg($conf_path))}";
 		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_SYNC);
 		$ret_code = $res['ret_code'];
