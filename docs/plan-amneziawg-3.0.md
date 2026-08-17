@@ -232,9 +232,11 @@ Tareas que quedan:
 3. Rearmar el `.pkg` con los dos binarios nuevos, que hasta ahora se pusieron
    a mano en el firewall para probar.
 
-Estado del firewall de prueba (192.168.30.1): paquete 1.0.0 instalado con los
-binarios 3.1 puestos a mano; los originales quedaron en `/root/amneziawg-go.20.bak`
-y `/root/awg.20.bak`.
+Estado del firewall de prueba (192.168.30.1): **sin el paquete**. Se instaló el
+1.0.0 con los binarios 3.1 puestos a mano para correr las pruebas de arriba, y
+después se desinstaló, así que la caja quedó como estaba. Los binarios 2.0
+originales siguen en `/root/amneziawg-go.20.bak` y `/root/awg.20.bak` por si
+hacen falta para comparar.
 
 ## Fase 2 — el modelo de datos
 
