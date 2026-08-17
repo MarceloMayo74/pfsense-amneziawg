@@ -701,7 +701,7 @@ if ($awg3) {
 		null,
 		'fa-solid fa-key'
 	))->addClass('btn-primary btn-sm awg-v3-only')
-	  ->setHelp('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.<br />Its nonce is taken from the first 12 bytes of each packet\'s padding, so with a key set <b>S1 through S4 must all be 12 or more</b> — including S4, which is the one paid for on every data packet. Leaving the key empty is what keeps S4 free.');
+	  ->setHelp(sprintf('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.<br />Its nonce is taken from the first %1$d bytes of each packet\'s padding, so while a key is set <b>S1 through S4 are raised to %1$d</b> above — including S4, the one paid for on every data packet. Clearing the key is what makes S4 free again.', $awgg['header_protection_min_padding']));
 
 	$group = new Form_Group('Content Padding');
 
@@ -942,6 +942,36 @@ events.push(function() {
 	 * Los campos de 2.0 pueden no existir en la pagina --contra un backend
 	 * 1.x-- y entonces esto no hace nada, que es lo correcto.
 	 */
+	/*
+	 * Con proteccion de headers, los cuatro rellenos tienen que llegar al
+	 * minimo: el nonce del ChaCha20 sale de ahi. S4 es el unico que suele estar
+	 * en cero --es el que se paga en cada paquete de datos-- asi que subirlo es
+	 * parte de prender la clave, y la pantalla lo hace en vez de rebotar el
+	 * guardado. Solo si hay clave: sin ella esos bytes no compran nada.
+	 *
+	 * La validacion del servidor sigue estando: esto es comodidad, no la regla.
+	 */
+	var awgHpMin = <?=(int) $awgg['header_protection_min_padding']?>;
+
+	function awgEnsurePadding() {
+		if (parseInt($('#awgversion').val(), 10) < 3) {
+			return;
+		}
+
+		if ($('#headerprotectionkey').val().trim() === '') {
+			return;
+		}
+
+		$.each(['s1', 's2', 's3', 's4'], function(i, field) {
+			var $input = $('#' + field);
+
+			if ($input.length && (($input.val().trim() === '') ||
+			    (parseInt($input.val(), 10) < awgHpMin))) {
+				$input.val(awgHpMin);
+			}
+		});
+	}
+
 	function awgApplyVersion() {
 		var level  = parseInt($('#awgversion').val(), 10);
 		var below2 = (level < 2);
@@ -956,6 +986,8 @@ events.push(function() {
 		hideClass('awg-v3-only', below3);
 		hideInput('genhpk', below3);
 		hideClass('awg-v4-only', below4);
+
+		awgEnsurePadding();
 	}
 
 	$('#awgversion').change(awgApplyVersion);
@@ -1018,6 +1050,9 @@ events.push(function() {
 			data: {act: 'genhpk'},
 			success: function(response) {
 				$('#headerprotectionkey').val(response);
+
+				// Recien ahora hay clave, asi que el relleno pasa a hacer falta
+				awgEnsurePadding();
 			}
 		});
 	});
