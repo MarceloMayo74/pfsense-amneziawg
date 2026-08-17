@@ -65,7 +65,19 @@ done
 
 ifconfig $IF >/dev/null 2>&1 && check "crea su interfaz" 0 || check "crea su interfaz" 1 "$IF no existe"
 
-PID=$(ps auxww | grep -v grep | grep "$BIN $IF" | awk '{print $2}' | head -1)
+# Con reintentos, y no una sola mirada: el proceso se demoniza --el padre forkea
+# un hijo que re-ejecuta-- y en 3.x hay una ventana en la que el socket UAPI ya
+# existe pero el argv del hijo todavia no aparece en ps, asi que una sola pasada
+# puede no encontrar nada. No es cosmetico: sin PID esta prueba se saltea el
+# teardown de mas abajo y deja la interfaz levantada, y una interfaz de descarte
+# que queda dando vueltas termina en un 'ifconfig destroy' colgado.
+i=0
+while [ $i -lt 25 ]; do
+	PID=$(ps auxww | grep -v grep | grep "$BIN $IF" | awk '{print $2}' | head -1)
+	[ -n "$PID" ] && break
+	sleep 0.2
+	i=$((i + 1))
+done
 
 [ -n "$PID" ] && check "el proceso sigue vivo" 0 || check "el proceso sigue vivo" 1 "no hay pid"
 

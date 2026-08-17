@@ -201,6 +201,22 @@ Tres cosas, ninguna prevista:
    `IPC_SUPPORTS_KERNEL_INTERFACE`. **Vale la pena reportarlo upstream**, como
    se hizo con sticky sockets.
 
+#### Lo que sí hay que resolver antes de empaquetar
+
+**El SIGTERM de 3.1 no se lleva la interfaz.** En 2.0, mandarle SIGTERM al
+proceso bajaba el túnel entero: desaparecían la interfaz y el `.sock` (era el
+hallazgo de la fase 4 del bring-up original). Con 3.1, `spike/verify-sticky.sh`
+deja `tun9099` levantada y el socket en `run_path` después del SIGTERM. Y una
+interfaz que queda dando vueltas es cara: un `ifconfig destroy` que se cruza con
+un daemon arrancando la deja **colgada en estado D**, imposible de matar, y de
+ahí no se sale sin reiniciar.
+
+Hay que mirarlo antes de armar el `.pkg`: si `awg_proc_stop()` ya no alcanza,
+el camino de bajada tiene que destruir la interfaz y borrar el socket él mismo
+—y con cuidado del orden, porque el race es real—. Ojo que en el bring-up de
+dos túneles la bajada sí funcionó, así que no es que 3.1 nunca limpie: falta
+entender la diferencia.
+
 Tareas que quedan:
 
 1. `NOTICE` y `docs/licencias.md`: el `awg` deja de ser el del port, y
