@@ -48,9 +48,10 @@ $globals = file_get_contents("{$src}/awg_globals.inc");
 preg_match("/'obfuscation_fields'.*?'disablecookies'.*?\)\),/s", $globals, $fields);
 preg_match("/'header_mask'\s*=>\s*'([^']+)'/", $globals, $mask);
 preg_match("/'range_mask'\s*=>\s*'([^']+)'/", $globals, $range_mask);
+preg_match("/'header_protection_min_padding'\s*=>\s*(\d+)/", $globals, $hp_min);
 
-if (empty($fields) || empty($mask) || empty($range_mask)) {
-	fwrite(STDERR, "No se pudieron leer obfuscation_fields/header_mask/range_mask de awg_globals.inc\n");
+if (empty($fields) || empty($mask) || empty($range_mask) || empty($hp_min)) {
+	fwrite(STDERR, "Falta algo en awg_globals.inc: obfuscation_fields, header_mask, range_mask o header_protection_min_padding\n");
 	exit(2);
 }
 
@@ -63,7 +64,8 @@ if (empty($versions)) {
 }
 
 eval('$awgg = array(' . rtrim($fields[0], ',') . ', ' . rtrim($versions[0], ',') .
-     ", 'header_mask' => '{$mask[1]}', 'range_mask' => '{$range_mask[1]}');");
+     ", 'header_mask' => '{$mask[1]}', 'range_mask' => '{$range_mask[1]}'" .
+     ", 'header_protection_min_padding' => {$hp_min[1]});");
 
 /*
  * El techo depende de una sonda al backend, que fuera del firewall no existe.
@@ -185,16 +187,46 @@ check('basura se rechaza',         n(array('maxhandshakeattempts' => 'muchas')) 
 echo "\n=== la clave de proteccion de headers ===\n";
 $clave_ok = base64_encode(str_repeat("\x41", 32));
 
-check('32 bytes en base64 valen', n(array('headerprotectionkey' => $clave_ok)) === 0,
-      json_encode(errs(array('headerprotectionkey' => $clave_ok))));
+/*
+ * Con la clave puesta hay que darle relleno a los cuatro tipos de paquete, o
+ * salta ADEMAS el error de esa regla. Se acompaña para poder probar la forma de
+ * la clave por separado.
+ */
+$con_relleno = array('s1' => '30', 's2' => '30', 's3' => '30', 's4' => '16');
+
+function k($clave) { global $con_relleno; return array_merge($con_relleno, array('headerprotectionkey' => $clave)); }
+
+check('32 bytes en base64 valen', n(k($clave_ok)) === 0, json_encode(errs(k($clave_ok))));
 check('31 bytes se rechazan',
-      n(array('headerprotectionkey' => base64_encode(str_repeat("\x41", 31)))) === 1);
+      n(k(base64_encode(str_repeat("\x41", 31)))) === 1);
 check('33 bytes se rechazan, aunque midan 44 caracteres',
-      n(array('headerprotectionkey' => base64_encode(str_repeat("\x41", 33)))) === 1);
+      n(k(base64_encode(str_repeat("\x41", 33)))) === 1);
 check('texto que no es base64 se rechaza',
-      n(array('headerprotectionkey' => 'esto no es una clave')) === 1);
+      n(k('esto no es una clave')) === 1);
 check('44 caracteres que no decodifican a 32 bytes se rechazan',
-      n(array('headerprotectionkey' => str_repeat('!', 44))) === 1);
+      n(k(str_repeat('!', 44))) === 1);
+
+/*
+ * Y la regla que ata la clave con S1-S4, que es la unica del backend que cruza
+ * dos niveles. Sin ella el .conf sale bien formado, awg(8) lo parsea, y el
+ * setconf muere con un 'Invalid argument' que no dice cual de los cuatro falto.
+ */
+echo "\n=== la clave necesita lugar para su nonce ===\n";
+check('sin S1-S4 la clave se rechaza',
+      n(array('headerprotectionkey' => $clave_ok)) === 1,
+      json_encode(errs(array('headerprotectionkey' => $clave_ok))));
+check('con S4 en cero tambien, que es el default de 2.0',
+      n(array_merge(k($clave_ok), array('s4' => '0'))) === 1);
+check('con S4 en 11 tambien: el minimo es 12',
+      n(array_merge(k($clave_ok), array('s4' => '11'))) === 1);
+check('con S4 en 12 justo, vale',
+      n(array_merge(k($clave_ok), array('s4' => '12'))) === 0,
+      json_encode(errs(array_merge(k($clave_ok), array('s4' => '12')))));
+check('sin clave, S4 en cero sigue estando bien',
+      n(array('s4' => '0')) === 0);
+check('el error nombra los campos que faltan',
+      strpos(implode(' ', errs(array_merge(k($clave_ok), array('s2' => '', 's4' => '')))), 'S2, S4') !== false,
+      json_encode(errs(array_merge(k($clave_ok), array('s2' => '', 's4' => '')))));
 
 echo "\n=== los booleanos de 3.1 ===\n";
 check('on vale',            n(array('randomtrailers' => 'on')) === 0);
@@ -359,6 +391,32 @@ check('en 1.x no sortea S3/S4, que ese backend no entiende',
 	implode(',', array_keys($sin_awg2)));
 
 check('en 2.0 si los sortea', isset(awg_gen_obfuscation(2)['s3']));
+
+/*
+ * De 3.0 en adelante S4 no puede quedar en cero: un tunel nuevo nace con
+ * HeaderProtectionKey y el backend exige relleno en los cuatro tipos de
+ * paquete. Lo que se prueba es que lo sorteado alcance la regla por si solo.
+ */
+$cortos = $no_valida = 0;
+$min_hp = $awgg['header_protection_min_padding'];
+
+for ($i = 0; $i < 200; $i++) {
+	$gen = awg_gen_obfuscation(3);
+
+	foreach (array('s1', 's2', 's3', 's4') as $padding) {
+		if ((int) $gen[$padding] < $min_hp) {
+			$cortos++;
+		}
+	}
+
+	if (count(awg_validate_obfuscation(pc(array_merge($gen,
+	    array('headerprotectionkey' => $clave_ok))))) !== 0) {
+		$no_valida++;
+	}
+}
+
+check("200 sorteos de 3.0: los cuatro rellenos llegan a {$min_hp}", $cortos === 0, "cortos={$cortos}");
+check('200 sorteos de 3.0: todos valen con una clave puesta', $no_valida === 0, "invalidos={$no_valida}");
 
 /*
  * La razon por la que S1+148 != S2+92: que un init y un response no midan igual

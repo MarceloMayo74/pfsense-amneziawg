@@ -307,6 +307,24 @@ $awgg = array(
 	'range_mask'		=> '/^\d{1,5}(-\d{1,5})?$/',
 
 	/*
+	 * Cuanto relleno necesita CADA tipo de paquete para poder usar la proteccion
+	 * de headers, o sea el minimo de S1, S2, S3 y S4 cuando hay
+	 * HeaderProtectionKey.
+	 *
+	 * No es una politica nuestra: es HeaderCipherNonceSize de amneziawg-go. El
+	 * nonce del ChaCha20 que cifra el header sale de los primeros 12 bytes del
+	 * relleno --HeaderProtectionCipher(crypt[:HeaderCipherNonceSize])-- asi que
+	 * un tipo de paquete con menos relleno no tiene donde ponerlo, y
+	 * mergeWithDevice() rechaza el setconf ENTERO. El error que llega a la GUI
+	 * es 'Invalid argument', que no dice cual de los cuatro campos fue.
+	 *
+	 * La consecuencia practica esta en S4: venia en cero a proposito porque es
+	 * el unico que se paga en cada paquete de datos. Con proteccion de headers
+	 * deja de poder ser cero.
+	 */
+	'header_protection_min_padding'	=> 12,
+
+	/*
 	 * Valores de referencia, y nada mas que eso: se muestran como placeholder
 	 * del campo vacio para dar una idea del orden de magnitud.
 	 *

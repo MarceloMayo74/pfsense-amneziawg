@@ -435,6 +435,39 @@ function awg_validate_obfuscation($pconfig) {
 	}
 
 	/*
+	 * La proteccion de headers necesita lugar para su nonce, y ese lugar es el
+	 * relleno de cada tipo de paquete. Con HeaderProtectionKey puesta,
+	 * mergeWithDevice() exige que S1, S2, S3 y S4 lleguen a
+	 * HeaderCipherNonceSize y si no rechaza el setconf entero, con un
+	 * 'Invalid argument' que no dice cual falto.
+	 *
+	 * Es la unica regla del backend que ata dos campos de niveles distintos, y
+	 * la que hace que S4 deje de poder ser cero: es el unico relleno que se
+	 * paga en cada paquete de datos.
+	 */
+	$hpk = trim((string) ($pconfig['headerprotectionkey'] ?? ''));
+
+	if ($hpk !== '') {
+		$min = $awgg['header_protection_min_padding'];
+
+		$faltan = array();
+
+		foreach (array('s1', 's2', 's3', 's4') as $padding) {
+			$value = trim((string) ($pconfig[$padding] ?? ''));
+
+			if (($value === '') || !ctype_digit($value) || ((int) $value < $min)) {
+				$faltan[] = strtoupper($padding);
+			}
+		}
+
+		if (!empty($faltan)) {
+			$input_errors[] = sprintf(
+				gettext('HeaderProtectionKey needs %1$s to be %2$d or more: the nonce that encrypts the header is taken from the first %2$d bytes of each packet\'s padding, so every packet type needs room for it. The backend rejects the whole tunnel otherwise. Either raise them or clear the key.'),
+				implode(', ', $faltan), $min);
+		}
+	}
+
+	/*
 	 * amneziawg-go compara los cuatro headers de a pares y rechaza el setconf
 	 * ENTERO si dos se pisan, asi que un solapamiento no rompe un campo: deja
 	 * el tunel sin levantar.

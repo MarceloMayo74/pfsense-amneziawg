@@ -701,7 +701,7 @@ if ($awg3) {
 		null,
 		'fa-solid fa-key'
 	))->addClass('btn-primary btn-sm awg-v3-only')
-	  ->setHelp('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.');
+	  ->setHelp('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.<br />Its nonce is taken from the first 12 bytes of each packet\'s padding, so with a key set <b>S1 through S4 must all be 12 or more</b> — including S4, which is the one paid for on every data packet. Leaving the key empty is what keeps S4 free.');
 
 	$group = new Form_Group('Content Padding');
 

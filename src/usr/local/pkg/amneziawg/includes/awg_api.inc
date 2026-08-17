@@ -897,6 +897,8 @@ function awg_gen_headers() {
  *   los dos booleanos       prenderlos es una decision, no un default
  */
 function awg_gen_obfuscation($version = 1) {
+	global $awgg;
+
 	$jmin = random_int(40, 96);
 
 	$gen = array(
@@ -924,6 +926,22 @@ function awg_gen_obfuscation($version = 1) {
 	if ($version >= 2) {
 		$gen['s3'] = (string) random_int(15, 64);
 		$gen['s4'] = '0';
+	}
+
+	/*
+	 * De 3.0 en adelante S4 no puede quedar en cero, y no es una preferencia:
+	 * un tunel nuevo nace con HeaderProtectionKey, y el backend exige que los
+	 * cuatro rellenos lleguen a HeaderCipherNonceSize para poder meter ahi el
+	 * nonce del header. Con S4 en cero rechaza el setconf entero.
+	 *
+	 * O sea que a partir de 3.0 la proteccion de headers se paga en cada
+	 * paquete de datos. Se sortea lo justo por encima del minimo -- lo que hace
+	 * falta y nada mas -- porque cada byte de S4 sale del MTU.
+	 */
+	if ($version >= 3) {
+		$min = $awgg['header_protection_min_padding'];
+
+		$gen['s4'] = (string) random_int($min, $min * 2);
 	}
 
 	foreach (awg_gen_headers() as $header => $value) {
