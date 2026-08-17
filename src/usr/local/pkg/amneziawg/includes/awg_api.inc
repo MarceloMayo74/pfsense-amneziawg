@@ -584,6 +584,118 @@ function awg_peer_set_config($tunnel_name, $public_key, $key = null, $value = nu
 	return ($ret_code == 0);
 }
 
+/*
+ * Los parametros de ofuscacion que el proceso tiene puestos AHORA, leidos de
+ * awg showconf. Devuelve los nombres como estan en obfuscation_fields.
+ *
+ * "Puesto" no es lo mismo que "aparece". showconf imprime cada campo detras de
+ * su flag HAS_, pero el UAPI de amneziawg-go emite random_trailers y
+ * disable_cookies SIEMPRE --sin condicion, en uapi.go-- asi que awg(8) los
+ * marca como presentes en todos los tuneles. Un 'off' ahi significa que no
+ * estan, igual que un 0 en un relleno. Sin esta distincion, cualquier tunel
+ * parece tener campos que su .conf no nombra.
+ */
+function awg_obfuscation_live($if_name) {
+	global $awgg;
+
+	$s = fn($x) => $x;
+
+	$live = array();
+
+	if (!awg_is_valid_tunnel($if_name, true)) {
+		return $live;
+	}
+
+	$out = array();
+
+	exec("{$awgg['awg']} showconf {$s(escapeshellarg($if_name))} 2>/dev/null", $out);
+
+	$names = array();
+
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		$names[strtolower($spec['key'] ?? $field)] = $field;
+	}
+
+	foreach ($out as $line) {
+		if (strpos($line, '=') === false) {
+			continue;
+		}
+
+		[$key, $value] = explode('=', $line, 2);
+
+		$key = strtolower(trim($key));
+
+		if (!isset($names[$key])) {
+			continue;
+		}
+
+		$field = $names[$key];
+		$value = trim($value);
+		$type  = $awgg['obfuscation_fields'][$field]['type'];
+
+		// Los valores neutros son lo mismo que no estar
+		if (($value === '') ||
+		    (($type === 'bool') && ($value === 'off')) ||
+		    (in_array($type, array('int', 'range'), true) && ((int) $value === 0))) {
+			continue;
+		}
+
+		$live[$field] = $value;
+	}
+
+	return $live;
+}
+
+/*
+ * Si el .conf nuevo SACA un parametro de ofuscacion que el proceso ya tiene
+ * puesto, un syncconf no alcanza.
+ *
+ * awg(8) aplica lo que el archivo dice y no toca lo que no nombra, asi que un
+ * parametro que se quita del archivo se queda vivo en el dispositivo. Bajar el
+ * nivel de un tunel --que es exactamente pedir que se escriba menos-- dejaba el
+ * proceso ofuscando con lo viejo mientras el .conf del cliente ya no lo lleva:
+ * el handshake deja de cerrar y nada lo dice.
+ *
+ * Con los campos de 3.0 el sintoma dejo de ser silencioso y paso a ser un error
+ * al aplicar, porque el backend rechaza el setconf entero si queda una
+ * HeaderProtectionKey viva con S1-S4 por debajo de su minimo. Fue asi como
+ * aparecio, pero el problema es de 2.0 en adelante.
+ *
+ * La salida es levantar el proceso de nuevo: un dispositivo recien creado no
+ * tiene nada puesto, asi que el .conf entra entero y sin restos.
+ */
+function awg_obfuscation_sync_needs_restart($if_name) {
+	global $awgg;
+
+	$conf_path = "{$awgg['conf_path']}/{$if_name}.conf";
+
+	if (!file_exists($conf_path)) {
+		return false;
+	}
+
+	$wanted = array();
+
+	foreach (file($conf_path) as $line) {
+		if (strpos($line, '=') === false) {
+			continue;
+		}
+
+		[$key] = explode('=', $line, 2);
+
+		$wanted[strtolower(trim($key))] = true;
+	}
+
+	foreach (awg_obfuscation_live($if_name) as $field => $value) {
+		$spec = $awgg['obfuscation_fields'][$field];
+
+		if (!isset($wanted[strtolower($spec['key'] ?? $field)])) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function awg_awg_if_sync($if_name, &$cmds = null) {
 	global $awgg;
 
@@ -598,6 +710,24 @@ function awg_awg_if_sync($if_name, &$cmds = null) {
 
 	if (file_exists($conf_path)
 	    && awg_is_valid_tunnel($if_name, true)) {
+		/*
+		 * Un parametro que se saca del .conf sigue vivo en el proceso, asi
+		 * que ahi no alcanza con sincronizar: hay que rearmar el dispositivo.
+		 */
+		if (awg_obfuscation_sync_needs_restart($if_name)) {
+			$cmds[] = array(
+				'cmd'		=> "restart {$if_name}",
+				'output'	=> array(sprintf(gettext('%s drops an obfuscation parameter, which a sync cannot clear; restarting it.'), $if_name)),
+				'ret_code'	=> 0,
+				'errors'	=> array());
+
+			awg_proc_stop($if_name, $cmds);
+
+			if (!awg_proc_start($if_name, $cmds)) {
+				return false;
+			}
+		}
+
 		$cmd = "{$awgg['awg']} syncconf {$s(escapeshellarg($if_name))} {$s(escapeshellarg($conf_path))}";
 		$cmds[] = $res = awg_exec($cmd, 'interface', AWG_ERROR_IF_SYNC);
 		$ret_code = $res['ret_code'];

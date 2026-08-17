@@ -190,6 +190,45 @@ exec("{$awgg['awg']} setconf {$iface} {$conf_path} 2>&1", $set2_out, $set2_rc);
 
 check('y el backend 3.1 lo acepta igual', $set2_rc === 0, implode(' | ', $set2_out));
 
+/*
+ * Bajar de nivel deja restos en el PROCESO, no en el archivo.
+ *
+ * awg(8) aplica lo que el .conf nombra y no toca lo que no nombra, asi que la
+ * HeaderProtectionKey de cuando el tunel estaba en 3.x sigue viva en el
+ * dispositivo. Mientras S4 quede por encima del minimo no se nota; en cuanto
+ * vuelve a cero --que es lo razonable al bajar a 2.0, porque ese relleno solo
+ * hacia falta para el nonce-- el backend rechaza el setconf entero.
+ *
+ * Es la version ruidosa de un problema mas viejo: lo mismo pasa con S3 o I1 al
+ * bajar de 2.0 a 1.x, solo que ahi el tunel simplemente deja de cerrar
+ * handshakes sin decir nada.
+ */
+$conf_bajado = str_replace("S4 = {$tunnel['s4']}\n", "S4 = 0\n", $conf_2x);
+
+/*
+ * Este va al conf_path del paquete y no a /tmp: awg_obfuscation_sync_needs_restart()
+ * compara el dispositivo contra el .conf que el paquete escribe, y ese es el
+ * unico archivo que mira. Se borra abajo.
+ */
+$conf_pkg = "{$awgg['conf_path']}/{$iface}.conf";
+
+// Volver a poner la clave viva, que el chequeo del 2.0 de arriba dejo aplicada
+file_put_contents($conf_path, $conf);
+exec("{$awgg['awg']} setconf {$iface} {$conf_path} 2>&1");
+
+file_put_contents($conf_pkg, $conf_bajado);
+
+check('el paquete detecta que hay restos y que hace falta reiniciar',
+	awg_obfuscation_sync_needs_restart($iface),
+	'no lo detecto: un apply que baja de nivel va a fallar');
+
+exec("{$awgg['awg']} syncconf {$iface} {$conf_pkg} 2>&1", $stale_out, $stale_rc);
+
+unlink($conf_pkg);
+
+check('y sin reiniciar el backend lo rechaza, que es por que hace falta',
+	$stale_rc !== 0, 'lo acepto; si el backend cambio, revisar awg_awg_if_sync()');
+
 unlink($conf_path);
 
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
