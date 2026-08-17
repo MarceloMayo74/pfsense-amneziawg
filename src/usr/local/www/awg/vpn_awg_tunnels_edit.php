@@ -701,7 +701,7 @@ if ($awg3) {
 		null,
 		'fa-solid fa-key'
 	))->addClass('btn-primary btn-sm awg-v3-only')
-	  ->setHelp(sprintf('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.<br />Its nonce is taken from the first %1$d bytes of each packet\'s padding, so while a key is set <b>S1 through S4 are raised to %1$d</b> above — including S4, the one paid for on every data packet. Clearing the key is what makes S4 free again.', $awgg['header_protection_min_padding']));
+	  ->setHelp(sprintf('Encrypts the packet header with ChaCha20, so the message type stops being readable. <b>Both ends need the same key</b>, and it travels in the client configuration file — so drawing a new one here locks out every client whose file was already handed over. New tunnels arrive with one already drawn.<br />Its nonce is taken from the first %1$d bytes of each packet\'s padding, so while a key is set <b>S1 through S4 are raised to %1$d</b> above — including S4, the one paid for on every data packet. Drop below 3.0 or clear the key and S4 goes back to 0, which is what makes it free again.', $awgg['header_protection_min_padding']));
 
 	$group = new Form_Group('Content Padding');
 
@@ -984,11 +984,29 @@ events.push(function() {
 			 * campo sigue teniendo EXACTAMENTE lo que pusimos: si el usuario lo
 			 * cambio despues, ese numero es suyo y no se toca.
 			 */
+			if (parseInt(valor, 10) !== awgHpMin) {
+				return;
+			}
+
 			var previo = $input.data('awgPrev');
 
-			if ((previo !== undefined) && (parseInt(valor, 10) === awgHpMin)) {
+			if (previo !== undefined) {
 				$input.val(previo);
 				$input.removeData('awgPrev');
+
+				return;
+			}
+
+			/*
+			 * Sin memoria de esta sesion --la pagina se abrio con el valor ya
+			 * guardado-- queda S4, que es el unico de los cuatro con una
+			 * respuesta clara: abajo de 3.0 el propio paquete lo sortea en cero,
+			 * porque es el unico relleno que se paga en cada paquete de datos.
+			 * Los otros tres no se tocan: ahi el minimo no significa nada
+			 * especial y el valor bien puede ser una eleccion.
+			 */
+			if (field === 's4') {
+				$input.val(0);
 			}
 		});
 	}
