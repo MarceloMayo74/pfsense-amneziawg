@@ -1457,9 +1457,31 @@ function next_awg_port() {
 
 	awg_globals();
 
+	/*
+	 * Los puertos UDP que ya tiene tomados el sistema, no solo los de este
+	 * paquete.
+	 *
+	 * Mirar unicamente los tuneles propios alcanzaba en un firewall limpio y
+	 * fallaba justo donde este paquete tiene mas sentido: en uno que ya corre el
+	 * WireGuard nativo, que escucha en 51820 -- el mismo default. El tunel se
+	 * guardaba bien y no levantaba, con un 'Address already in use' que aparece
+	 * al aplicar y no al elegir el puerto.
+	 */
+	$taken = array();
+
+	$out = array();
+
+	exec('/usr/bin/sockstat -4 -6 -u -l 2>/dev/null', $out);
+
+	foreach ($out as $line) {
+		if (preg_match('/[:.](\d+)\s+\S+\s*$/', $line, $m)) {
+			$taken[(int) $m[1]] = true;
+		}
+	}
+
 	for ($idx = $awgg['default_port']; $idx < $awgg['max_port']; $idx++) {
 		// Check to see if the port is already in use
-		$found = false;
+		$found = isset($taken[$idx]);
 
 		foreach (config_get_path('installedpackages/amneziawg/tunnels/item', []) as $tunnel) {
 			if ($tunnel['listenport'] == $idx) {

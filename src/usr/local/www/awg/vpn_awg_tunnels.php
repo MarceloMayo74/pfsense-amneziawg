@@ -242,6 +242,10 @@ endif;
 			<i class="fa-solid fa-plus icon-embed-btn"></i>
 			<?=gettext('Add Tunnel')?>
 		</a>
+		<a href="vpn_awg_tunnels_import.php" class="btn btn-primary btn-sm">
+			<i class="fa-solid fa-file-import icon-embed-btn"></i>
+			<?=gettext('Import')?>
+		</a>
 	</nav>
 </form>
 
