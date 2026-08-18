@@ -320,6 +320,9 @@ function awg_resolve_endpoints() {
 	// Las rutas de host que este recorrido determina que tienen que existir
 	$routes = array();
 
+	// Las claves corriendo de cada tunel, una consulta por tunel y no por peer
+	$running = array();
+
 	// Do we have any peers?
 	foreach (config_get_path('installedpackages/amneziawg/peers/item', []) as $peer) {
 		/*
@@ -357,10 +360,31 @@ function awg_resolve_endpoints() {
 			if ($ip !== '') {
 				$host = $ip;
 
-				$gw_ip = awg_gateway_address($peer['gateway'], $ip);
+				/*
+				 * La ruta se pone SOLO si este peer esta corriendo, que es la
+				 * misma condicion con la que awg_peer_set_endpoint() de mas
+				 * abajo decide hablarle al backend. Asi ruta y endpoint van
+				 * juntos por construccion: se rutea unicamente lo que de verdad
+				 * se le dijo al tunel.
+				 *
+				 * Sin este corte, un peer deshabilitado --o uno cuyo tunel esta
+				 * en 'unassigned' o parado-- igual dejaba puesta una ruta de
+				 * host. Eso desvia TODO el trafico a esa direccion por una WAN
+				 * elegida para un tunel que no esta levantado, que es
+				 * exactamente lo que la ayuda del campo promete que no pasa.
+				 */
+				$tun = $peer['tun'];
 
-				if ($gw_ip !== '') {
-					$routes[$ip] = $gw_ip;
+				if (!array_key_exists($tun, $running)) {
+					$running[$tun] = awg_tunnel_get_peers_running_keys($tun);
+				}
+
+				if (in_array($peer['publickey'], $running[$tun])) {
+					$gw_ip = awg_gateway_address($peer['gateway'], $ip);
+
+					if ($gw_ip !== '') {
+						$routes[$ip] = $gw_ip;
+					}
 				}
 			}
 		}

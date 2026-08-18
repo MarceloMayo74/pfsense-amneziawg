@@ -84,6 +84,34 @@ function awg_route_delete($dst) {
 	return true;
 }
 
+/*
+ * Para probar el recorrido entero hace falta el entorno de awg_resolve_endpoints():
+ * los peers, si el tunel esta corriendo, y las dos llamadas al backend.
+ */
+$GLOBALS['peers']	= array();
+$GLOBALS['corriendo']	= array();
+$GLOBALS['endpoints']	= array();
+
+function awg_globals() { }
+function get_dnsavailable() { return true; }
+function config_get_path($path, $default = null) { return $GLOBALS['peers']; }
+
+function awg_tunnel_get_peers_running_keys($tun) {
+	return $GLOBALS['corriendo'][$tun] ?? array();
+}
+
+function awg_peer_set_endpoint($tun, $pubkey, $endpoint) {
+	$GLOBALS['endpoints'][] = "{$tun} {$pubkey} {$endpoint}";
+}
+
+function lookup_gateway_ip_by_name($name) {
+	$tabla = array('WAN_DHCP' => '192.168.0.1', 'WAN2_PPPOE' => '200.51.241.1');
+
+	return $tabla[$name] ?? false;
+}
+
+eval(extract_function("{$src}/awg.inc", 'awg_resolve_endpoints'));
+eval(extract_function("{$src}/awg.inc", 'awg_gateway_address'));
 eval(extract_function("{$src}/awg.inc", 'awg_routes_reconcile'));
 eval(extract_function("{$src}/awg.inc", 'awg_routes_state_read'));
 eval(extract_function("{$src}/awg.inc", 'awg_routes_state_write'));
@@ -248,6 +276,91 @@ awg_routes_reconcile(array('203.0.113.45' => '200.51.241.1'));
 check('no rompe y agrega igual',
       $GLOBALS['hechas'] === array('add 203.0.113.45 200.51.241.1'),
       implode(' ; ', $GLOBALS['hechas']));
+
+echo "\n=== el recorrido entero: solo se rutea lo que esta corriendo ===\n";
+
+/*
+ * La ruta se pone unicamente si el peer esta corriendo, que es la MISMA
+ * condicion con la que awg_peer_set_endpoint() decide hablarle al backend. Sin
+ * ese corte, un peer deshabilitado o en un tunel sin asignar dejaba una ruta de
+ * host puesta: todo el trafico a esa direccion desviado por una WAN elegida
+ * para un tunel que no esta levantado.
+ */
+function correr_resolve($peers, $corriendo) {
+	global $state;
+
+	$GLOBALS['peers']	= $peers;
+	$GLOBALS['corriendo']	= $corriendo;
+	$GLOBALS['endpoints']	= array();
+	$GLOBALS['hechas']	= array();
+	$GLOBALS['ajenas']	= array();
+	$GLOBALS['fallan']	= array();
+	$GLOBALS['logs']	= array();
+
+	@unlink($state);
+
+	awg_resolve_endpoints();
+}
+
+$peer_ok = array(array(
+	'enabled'	=> 'yes',
+	'tun'		=> 'tun9000',
+	'publickey'	=> 'CLAVE_A',
+	'endpoint'	=> '203.0.113.45',
+	'port'		=> '51820',
+	'gateway'	=> 'WAN2_PPPOE'));
+
+correr_resolve($peer_ok, array('tun9000' => array('CLAVE_A')));
+
+check('con el peer corriendo se pone la ruta',
+      $GLOBALS['hechas'] === array('add 203.0.113.45 200.51.241.1'),
+      implode(' ; ', $GLOBALS['hechas']));
+check('y se le pasa el endpoint al backend', count($GLOBALS['endpoints']) === 1,
+      implode(' ; ', $GLOBALS['endpoints']));
+
+// El caso de la captura: tunel sin asignar, o sea sin ningun peer corriendo
+correr_resolve($peer_ok, array());
+
+check('con el tunel sin asignar NO se pone ruta', empty($GLOBALS['hechas']),
+      implode(' ; ', $GLOBALS['hechas']));
+check('y el registro queda vacio', estado() === array(), json_encode(estado()));
+
+// Un peer que estaba corriendo y se cae se lleva su ruta
+$GLOBALS['peers']	= $peer_ok;
+$GLOBALS['corriendo']	= array();
+$GLOBALS['hechas']	= array();
+$GLOBALS['ajenas']	= array();
+$GLOBALS['fallan']	= array();
+
+file_put_contents($state, json_encode(array('203.0.113.45' => '200.51.241.1')));
+
+awg_resolve_endpoints();
+
+check('un peer que deja de correr se lleva su ruta',
+      $GLOBALS['hechas'] === array('delete 203.0.113.45'),
+      implode(' ; ', $GLOBALS['hechas']));
+
+// Sin gateway no se toca ninguna ruta, y el endpoint va como nombre
+$peer_sin_gw = $peer_ok;
+$peer_sin_gw[0]['gateway']  = '';
+$peer_sin_gw[0]['endpoint'] = 'vpn.proveedor.com';
+
+correr_resolve($peer_sin_gw, array('tun9000' => array('CLAVE_A')));
+
+check('sin gateway no se pone ninguna ruta', empty($GLOBALS['hechas']));
+check('y el endpoint viaja como nombre, sin resolver',
+      $GLOBALS['endpoints'] === array('tun9000 CLAVE_A vpn.proveedor.com:51820'),
+      implode(' ; ', $GLOBALS['endpoints']));
+
+// Un gateway que no existe no arma ruta, pero el tunel sigue andando
+$peer_gw_malo = $peer_ok;
+$peer_gw_malo[0]['gateway'] = 'WAN9_FANTASMA';
+
+correr_resolve($peer_gw_malo, array('tun9000' => array('CLAVE_A')));
+
+check('un gateway inexistente no arma ruta', empty($GLOBALS['hechas']));
+check('pero el endpoint se sigue mandando igual', count($GLOBALS['endpoints']) === 1,
+      implode(' ; ', $GLOBALS['endpoints']));
 
 echo "\n=== resolver nombres ===\n";
 
