@@ -17,7 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$version = '1.1.0'
+$version = '1.2.0'
 $name    = 'pfSense-pkg-AmneziaWG'
 
 $root  = Split-Path $PSScriptRoot -Parent
