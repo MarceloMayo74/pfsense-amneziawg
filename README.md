@@ -491,7 +491,7 @@ tar -xzf awg-bin-FreeBSD:16:amd64.tar.gz -C bin\FreeBSD-16-amd64\
 Instalar:
 
 ```sh
-pkg add /root/pfSense-pkg-AmneziaWG-1.2.0-FreeBSD-16-amd64.pkg
+pkg add /root/pfSense-pkg-AmneziaWG-1.3.0-FreeBSD-16-amd64.pkg
 ```
 
 ## Objetivo
