@@ -124,6 +124,9 @@ if (!function_exists('is_ipaddrv4')) {
 	function ip_less_than($a, $b) { return (ip2long($a) < ip2long($b)); }
 }
 
+
+// El piso de la escalera. Se fija a mano: este test no arma awg_versions.
+function awg_min_version() { return 2; }
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_obfuscation_pairs'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_obfuscation_pairs'));
@@ -217,14 +220,27 @@ check('un tunel sin ofuscacion da un array vacio',
 $tunnel_1x = array_merge($tunnel, array('awgversion' => '1'));
 $tunnel_2x = array_merge($tunnel, array('awgversion' => '2'));
 
-check('un tunel marcado 1.x no escribe S3/S4/I1 aunque el firewall llegue a 2.0',
-	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['S3']) &&
-	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['S4']) &&
-	!isset(awg_obfuscation_pairs($tunnel_1x, 2)['I1']),
+/*
+ * 1.x salio de la escalera, asi que un tunel guardado ahi se sube al piso y
+ * pasa a escribir lo de 2.0. En un tunel 1.x de verdad esos campos estan
+ * vacios, asi que el .conf no cambia; aca el tunel de referencia los tiene
+ * cargados y por eso se ven.
+ */
+check('un tunel marcado 1.x se sube al piso de la escalera',
+	isset(awg_obfuscation_pairs($tunnel_1x, 2)['S3'], awg_obfuscation_pairs($tunnel_1x, 2)['I1']),
 	implode(',', array_keys(awg_obfuscation_pairs($tunnel_1x, 2))));
 
-check('un tunel marcado 1.x sigue escribiendo lo suyo',
+check('y sigue escribiendo lo suyo',
 	isset(awg_obfuscation_pairs($tunnel_1x, 2)['Jc'], awg_obfuscation_pairs($tunnel_1x, 2)['S1']));
+
+/*
+ * Pero el TECHO le gana al piso: contra un backend que solo entiende 1.x no se
+ * escriben los campos de 2.0, o el tunel no levanta.
+ */
+check('contra un backend 1.x el techo gana y no se escriben los de 2.0',
+	!isset(awg_obfuscation_pairs($tunnel_1x, 1)['S3']) &&
+	!isset(awg_obfuscation_pairs($tunnel_1x, 1)['I1']),
+	implode(',', array_keys(awg_obfuscation_pairs($tunnel_1x, 1))));
 
 check('un tunel marcado 2.0 escribe todo si el firewall llega',
 	isset(awg_obfuscation_pairs($tunnel_2x, 2)['S3'], awg_obfuscation_pairs($tunnel_2x, 2)['I1']));

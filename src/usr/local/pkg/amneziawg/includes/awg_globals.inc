@@ -325,23 +325,18 @@ $awgg = array(
 	 * escalon existe para poder decir "hasta aca entiende el otro extremo", no
 	 * para describir el backend.
 	 *
-	 * Los numeros NO se renumeran nunca, aunque un escalon deje de ofrecerse:
-	 * son lo que quedo guardado en cada tunel, y correrlos reinterpretaria en
-	 * silencio la configuracion de todos los que ya existen.
+	 * Los numeros NO se renumeran nunca, aunque un escalon se saque: son lo que
+	 * queda guardado en cada tunel, y correrlos reinterpretaria en silencio la
+	 * configuracion de todos los que ya existen. El 1 fue AmneziaWG 1.x y no se
+	 * reusa.
 	 *
-	 * 'offered' en false es un escalon que no se le propone mas a nadie pero que
-	 * se sigue entendiendo. Sacar la entrada de la tabla no es lo mismo:
-	 * awg_validate_obfuscation() rechaza un nivel que no conoce, asi que un
-	 * tunel viejo quedaria imposible de volver a guardar, y awg_import_level()
-	 * podria calcular un nivel que ya no existe.
+	 * 1.x salio de la lista: solo lo elegiria quien tenga un extremo AmneziaWG
+	 * 1.x, y no queda ninguno --la app estable de Android es 2.0.x desde hace
+	 * tiempo--. El piso de la escalera se lee de esta misma tabla, asi que un
+	 * valor por debajo se sube al minimo en vez de rechazarse; ver
+	 * awg_min_version().
 	 */
 	'awg_versions'	=> array(
-		1 => array(
-			'label' => 'AmneziaWG 1.x',
-			'offered' => false,
-			'descr' => 'Jc, Jmin, Jmax, S1, S2 y H1-H4. Sin S3/S4, sin I1-I5 y con headers ' .
-				   'de valor fijo. Ya no se ofrece: la app estable de Android es 2.0.x ' .
-				   'desde hace tiempo y no queda cliente en uso que se quede aca.'),
 		2 => array(
 			'label' => 'AmneziaWG 2.0',
 			'descr' => 'Agrega S3, S4 e I1-I5. Es lo que entiende la app estable de Android (2.0.x).'),
@@ -351,13 +346,6 @@ $awgg = array(
 		4 => array(
 			'label' => 'AmneziaWG 3.1',
 			'descr' => 'Agrega los dos booleanos: colas al azar y cookies apagadas.')),
-
-	/*
-	 * Hasta que nivel sabe escribir ESTE paquete, que es una cosa distinta de
-	 * hasta donde llega el backend instalado. El techo real es el minimo de los
-	 * dos, y lo calcula awg_version_ceiling().
-	 */
-	'awg_version_implemented'	=> 4,
 
 	// Un valor suelto, o un rango 'desde-hasta'.
 	'header_mask'		=> '/^\d{1,10}(-\d{1,10})?$/',

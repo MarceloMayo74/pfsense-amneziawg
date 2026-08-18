@@ -59,13 +59,12 @@ $test_port = 51820;
 function awg_version_ceiling($use_cache = true) { global $test_ceiling; return $test_ceiling; }
 
 /*
- * El piso del selector. 1.x sigue entendiendose --un tunel guardado ahi tiene
- * que poder editarse-- pero ya no se ofrece, asi que una importacion no puede
- * dejar un tunel nuevo en ese escalon.
+ * El piso de la escalera. 1.x salio de la lista, asi que un archivo viejo no
+ * puede dejar un tunel parado en ese escalon.
  */
 $test_floor = 2;
 
-function awg_lowest_offered_version() { global $test_floor; return $test_floor; }
+function awg_min_version() { global $test_floor; return $test_floor; }
 function next_awg_if() { global $test_if; return $test_if; }
 function next_awg_port() { global $test_port; return $test_port; }
 
@@ -193,8 +192,14 @@ check('y no los mezcla',
 
 echo "\n=== el nivel que pide el archivo ===\n";
 
-check('un archivo 1.x pide 1',
-      awg_import_level(array('jc' => '4', 'h1' => '5')) === 1);
+/*
+ * El piso es el de la tabla y no un 1 escrito a mano: 1.x salio de la lista, y
+ * un archivo que solo trae parametros de ese escalon no puede dejar el tunel
+ * parado ahi. Subirlo no cambia lo que se escribe, porque los campos que el
+ * escalon de arriba agrega estan vacios de todas formas.
+ */
+check('un archivo 1.x no baja del piso de la escalera',
+      awg_import_level(array('jc' => '4', 'h1' => '5')) === 2);
 check('con S3 pide 2',
       awg_import_level(array('jc' => '4', 's3' => '20')) === 2);
 check('con HeaderProtectionKey pide 3',
@@ -202,7 +207,7 @@ check('con HeaderProtectionKey pide 3',
 check('con RandomTrailers pide 4',
       awg_import_level(array('randomtrailers' => 'on')) === 4);
 check('un campo vacio no cuenta',
-      awg_import_level(array('s3' => '', 'headerprotectionkey' => '')) === 1);
+      awg_import_level(array('s3' => '', 'headerprotectionkey' => '')) === 2);
 
 echo "\n=== el tunel que sale ===\n";
 
@@ -243,9 +248,8 @@ check('pero los valores igual se guardan, para cuando el techo suba',
 $test_ceiling = 4;
 
 /*
- * Un .conf viejo --sin S3/S4 ni I1-I5-- calcula nivel 1, que ya no se ofrece.
- * No puede quedar ahi: subirlo no cambia lo que se escribe, porque
- * awg_obfuscation_pairs() saltea los campos vacios de todas formas.
+ * Un .conf sin S3/S4 ni I1-I5 entra igual, y lo que trae se conserva: lo unico
+ * que cambia es el escalon en el que queda parado.
  */
 $viejo = awg_import_parse("[Interface]\nPrivateKey = {$clave_a}\nJc = 4\nJmin = 40\nJmax = 70\n" .
 			  "S1 = 30\nS2 = 41\nH1 = 100\nH2 = 200\nH3 = 300\nH4 = 400\n\n" .
@@ -253,19 +257,12 @@ $viejo = awg_import_parse("[Interface]\nPrivateKey = {$clave_a}\nJc = 4\nJmin = 
 
 $built_viejo = awg_import_build($viejo, '', $e_viejo);
 
-check('un archivo 1.x no deja el tunel en un escalon que ya no se ofrece',
+check('queda en el piso de la escalera y no debajo',
       $built_viejo['tunnel']['awgversion'] === '2', $built_viejo['tunnel']['awgversion']);
 check('y lo que el archivo traia sigue estando',
       $built_viejo['tunnel']['jc'] === '4' && $built_viejo['tunnel']['s1'] === '30');
 check('sin inventar los campos que no traia',
       ($built_viejo['tunnel']['s3'] === '') && ($built_viejo['tunnel']['i1'] === ''));
-
-// Y si el piso bajara, el nivel del archivo se respeta como antes
-$test_floor = 1;
-$built_piso = awg_import_build($viejo, '', $e_piso);
-check('con el piso en 1 vuelve a respetarse el nivel del archivo',
-      $built_piso['tunnel']['awgversion'] === '1', $built_piso['tunnel']['awgversion']);
-$test_floor = 2;
 
 echo "\n=== el peer que sale ===\n";
 

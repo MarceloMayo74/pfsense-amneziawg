@@ -131,7 +131,16 @@ function awg_import_parse($text, &$error = null) {
 function awg_import_level($interface) {
 	global $awgg;
 
-	$level = 1;
+	/*
+	 * Se arranca del piso de la escalera y no de un 1 escrito a mano: un
+	 * archivo sin S3/S4 ni I1-I5 daria 1.x, que ya no esta en la lista, y de ahi
+	 * saldria un tunel parado en un escalon que el selector no ofrece.
+	 *
+	 * Subirlo no cambia lo que se escribe: awg_obfuscation_pairs() saltea los
+	 * campos vacios, asi que ese archivo produce el mismo .conf en cualquiera de
+	 * los dos escalones.
+	 */
+	$level = awg_min_version();
 
 	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
 		$key = strtolower($spec['key'] ?? $field);
@@ -216,19 +225,7 @@ function awg_import_build($parsed, $descr = '', &$error = null) {
 	 * el tunel va a escribir de menos y no va a levantar contra ese servidor.
 	 * Avisar de eso es cosa de la pagina; aca solo se deja el numero correcto.
 	 */
-	/*
-	 * El nivel sale del archivo y se topea con lo que este firewall alcanza,
-	 * pero no baja de un escalon que ya no se ofrece.
-	 *
-	 * Subirlo no cambia lo que se escribe: awg_obfuscation_pairs() saltea los
-	 * campos vacios, asi que un archivo sin S3/S4 ni I1-I5 produce el mismo
-	 * .conf en 1.x que en 2.0. Lo unico que cambia es que si despues se le
-	 * completa un S3 a mano, en 2.0 se escribe y en 1.x se habria ignorado en
-	 * silencio.
-	 */
-	$tunnel['awgversion'] = (string) min(
-		max(awg_import_level($iface), awg_lowest_offered_version()),
-		awg_version_ceiling());
+	$tunnel['awgversion'] = (string) min(awg_import_level($iface), awg_version_ceiling());
 
 	$peers = array();
 

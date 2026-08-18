@@ -858,7 +858,7 @@ function awg_backend_version($use_cache = true) {
 function awg_version_ceiling($use_cache = true) {
 	global $awgg;
 
-	return min(awg_backend_version($use_cache), $awgg['awg_version_implemented']);
+	return min(awg_backend_version($use_cache), awg_max_version());
 }
 
 /*
@@ -891,27 +891,44 @@ function awg_tunnel_version($tunnel, $ceiling = null) {
 		return $ceiling;
 	}
 
-	return max(1, min((int) $stored, $ceiling));
+	/*
+	 * Un valor por debajo del piso de la tabla se sube, en vez de rechazarse. Lo
+	 * unico que puede quedar ahi es un tunel guardado en un escalon que despues
+	 * se saco --1.x-- y subirlo no cambia lo que escribe: los campos que el
+	 * escalon de arriba agrega estan vacios en un tunel asi, y
+	 * awg_obfuscation_pairs() saltea los vacios.
+	 *
+	 * El TECHO se aplica ultimo y le gana al piso. Al reves, un backend que solo
+	 * entiende 1.x recibiria igual los campos de 2.0 --el piso los subiria por
+	 * encima de lo que ese backend acepta-- y el tunel no levantaria. El techo
+	 * es una capacidad real del otro lado; el piso es solo una preferencia de
+	 * este paquete sobre que ofrecer.
+	 */
+	return min($ceiling, max(awg_min_version(), (int) $stored));
 }
 
 /*
- * El escalon mas bajo que este paquete todavia ofrece.
+ * Los dos extremos de la escalera, leidos de la tabla y no escritos como
+ * constantes al lado.
  *
- * Los que ya no se ofrecen siguen en la tabla y se siguen entendiendo --un
- * tunel guardado en uno de ellos tiene que poder editarse-- pero nada nuevo
- * deberia nacer ahi.
+ * El maximo es, por definicion, hasta donde sabe escribir este paquete. Tenerlo
+ * ademas como constante aparte se desincroniza solo: agregar un escalon a la
+ * tabla y olvidarse de subir la constante capa el techo en silencio, que es la
+ * clase de error que no da ningun sintoma hasta que alguien no puede elegir un
+ * nivel que ya existe.
+ *
+ * El minimo cambia cuando un escalon sale de la lista, como paso con 1.x.
  */
-function awg_lowest_offered_version() {
+function awg_min_version() {
 	global $awgg;
 
-	foreach ($awgg['awg_versions'] as $level => $meta) {
-		if ($meta['offered'] ?? true) {
-			return $level;
-		}
-	}
-
-	// Todos marcados como no ofrecidos no deberia pasar; el mas bajo sirve igual
 	return (int) array_key_first($awgg['awg_versions']);
+}
+
+function awg_max_version() {
+	global $awgg;
+
+	return (int) max(array_keys($awgg['awg_versions']));
 }
 
 /*

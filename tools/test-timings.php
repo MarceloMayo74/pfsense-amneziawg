@@ -67,6 +67,9 @@ eval("\$awgg = array('timing_defaults' => array({$td[1]}), 'range_mask' => {$rm[
 function awg_version_ceiling($use_cache = true) { return 4; }
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
+
+// El piso de la escalera. Se fija a mano: este test no arma awg_versions.
+function awg_min_version() { return 2; }
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_timings'));
 

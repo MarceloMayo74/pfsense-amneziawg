@@ -91,6 +91,8 @@ function awg_version_ceiling($use_cache = true) {
 }
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_min_version'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_max_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_headers'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_break_size_collisions'));
@@ -254,8 +256,13 @@ check('sin clave, S4 en cero sigue estando bien',
 check('en un tunel 2.0 la clave guardada no exige relleno',
       n(array_merge(k($clave_ok), array('awgversion' => '2', 's4' => '0'))) === 0,
       json_encode(errs(array_merge(k($clave_ok), array('awgversion' => '2', 's4' => '0')))));
-check('en 1.x tampoco',
-      n(array_merge(k($clave_ok), array('awgversion' => '1', 's4' => '0'))) === 0);
+/*
+ * Un tunel guardado en 1.x --escalon que salio de la lista-- se sube al piso y
+ * se juzga como 2.0, que tampoco exige relleno.
+ */
+check('y uno guardado en el 1.x que ya no se ofrece tampoco',
+      n(array_merge(k($clave_ok), array('awgversion' => '1', 's4' => '0'))) === 0,
+      json_encode(errs(array_merge(k($clave_ok), array('awgversion' => '1', 's4' => '0')))));
 check('pero en 3.0 si',
       n(array_merge(k($clave_ok), array('awgversion' => '3', 's4' => '0'))) === 1);
 
@@ -423,7 +430,7 @@ $test_ceiling = 2;
 check('sin campo no se valida nada: es un tunel de antes del selector',
 	count(awg_validate_obfuscation(pc())) === 0);
 
-foreach (array('1', '2') as $ok) {
+foreach (array('2') as $ok) {
 	check("acepta el nivel {$ok}, que esta bajo el techo",
 		count(awg_validate_obfuscation(pc(array('awgversion' => $ok)))) === 0,
 		json_encode(awg_validate_obfuscation(pc(array('awgversion' => $ok)))));
@@ -441,19 +448,36 @@ check('rechaza cualquier cosa que no sea un nivel',
 
 $test_ceiling = 1;
 
-check('con un backend 1.x rechaza el 2.0 que antes aceptaba',
-	count(awg_validate_obfuscation(pc(array('awgversion' => '2')))) === 1);
+/*
+ * Un techo de 1 es alcanzable de verdad: awg_backend_version() arranca en 1 y
+ * solo sube si sus sondas contestan, asi que un backend roto o ausente da 1 --
+ * que ya no es un escalon de la tabla. El mensaje no puede salir con el nombre
+ * vacio.
+ */
+$errs_techo_1 = awg_validate_obfuscation(pc(array('awgversion' => '2')));
 
-check('con un backend 1.x el 1.x sigue estando bien',
-	count(awg_validate_obfuscation(pc(array('awgversion' => '1')))) === 0);
+check('con un backend 1.x rechaza el 2.0 que antes aceptaba',
+	count($errs_techo_1) === 1, json_encode($errs_techo_1));
+check('y lo explica sin dejar el nombre del nivel en blanco',
+	(strpos($errs_techo_1[0], 'does not understand any level') !== false),
+	$errs_techo_1[0] ?? '(sin error)');
+
+/*
+ * 1.x salio de la lista, asi que ya no es un nivel elegible: awg_tunnel_version()
+ * sube al piso, y contra un techo de 1 el techo gana y queda en 1. Lo que se
+ * comprueba es que un valor viejo guardado no bloquee el guardado.
+ */
+check('un 1.x guardado no bloquea el guardado',
+	count(awg_validate_obfuscation(pc(array('awgversion' => '1')))) === 0,
+	json_encode(awg_validate_obfuscation(pc(array('awgversion' => '1')))));
 
 /*
  * Y con un backend 3.1, que es donde el techo llega a lo que este paquete sabe
- * escribir. Los cuatro escalones tienen que ser elegibles.
+ * escribir. Los tres escalones que se ofrecen tienen que ser elegibles.
  */
 $test_ceiling = 4;
 
-foreach (array('1', '2', '3', '4') as $ok) {
+foreach (array('2', '3', '4') as $ok) {
 	check("con techo 3.1 acepta el nivel {$ok}",
 		count(awg_validate_obfuscation(pc(array('awgversion' => $ok)))) === 0,
 		json_encode(awg_validate_obfuscation(pc(array('awgversion' => $ok)))));

@@ -297,12 +297,28 @@ function awg_validate_obfuscation($pconfig) {
 	if ($version !== '') {
 		$ceiling = awg_version_ceiling();
 
-		if (!isset($awgg['awg_versions'][$version])) {
+		/*
+		 * Se rechaza lo que este paquete no podria haber escrito nunca, y NO lo
+		 * que quedo por debajo del piso. Un valor bajo es un escalon que se saco
+		 * de la lista despues --1.x-- y awg_tunnel_version() lo sube solo;
+		 * rechazarlo dejaria ese tunel imposible de guardar, con un error que
+		 * nombra un campo que el operador jamas eligio.
+		 */
+		if (!ctype_digit($version) || ((int) $version > awg_max_version())) {
 			$input_errors[] = gettext('The AmneziaWG compatibility level is not one this package knows.');
 		} else if ((int) $version > $ceiling) {
-			$input_errors[] = sprintf(
-				gettext('This firewall cannot go past %s.'),
-				$awgg['awg_versions'][$ceiling]['label']);
+			/*
+			 * El techo puede quedar por debajo del piso de la escalera:
+			 * awg_backend_version() arranca en 1 y solo sube si sus sondas
+			 * contestan, asi que un backend roto o ausente da 1, que ya no es un
+			 * escalon de la tabla. Sin este corte el mensaje saldria con el
+			 * nombre vacio.
+			 */
+			$label = $awgg['awg_versions'][$ceiling]['label'] ?? '';
+
+			$input_errors[] = ($label !== '')
+				? sprintf(gettext('This firewall cannot go past %s.'), $label)
+				: gettext('The AmneziaWG backend on this firewall does not understand any level this package offers. Check that the service is installed and running.');
 		}
 	}
 
