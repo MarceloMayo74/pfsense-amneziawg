@@ -1183,14 +1183,16 @@ function awg_client_tunnel_hints() {
  * awg_do_peer_post() valide y guarde -- ese camino ya lo ejercitaron las fases
  * 4 y 5 y no se toca-- y recien despues se escriben los datos del cliente.
  *
- * Dos cosas que parecen errores y son deliberadas, heredadas de wgeasy:
+ * El Endpoint y el keepalive van a un lado o al otro segun el modo, y esa es la
+ * parte que hay que tener presente al tocar esta funcion:
  *
- *   - El endpoint que se guarda en el peer es el de ESTE firewall, el que disca
- *     el cliente. Asi la lista de peers muestra una direccion en vez de
- *     "Dynamic". WireGuard lo reemplaza solo por el origen real del cliente en
- *     cuanto llega su primer handshake valido.
- *   - El keepalive NO se guarda en el peer: es cosa del cliente, que es el que
- *     esta detras del NAT, y va unicamente en su archivo.
+ *   - GENERANDO, los dos son cosa del cliente y van unicamente en su archivo.
+ *     El peer se guarda dynamic y sin endpoint, porque su direccion la aprende
+ *     el servidor del handshake que llega. Ver el comentario largo de mas abajo
+ *     para que pasa si igual se lo guarda.
+ *   - SIN GENERAR, los dos son del peer: el endpoint es el sitio remoto al que
+ *     discamos y el keepalive lo manda este firewall. Es el peer site-to-site,
+ *     y el que deja armado una importacion.
  */
 function awg_client_do_peer_post($post) {
 	global $awgg;
@@ -1314,25 +1316,6 @@ function awg_client_do_peer_post($post) {
 			$input_errors[] = gettext('At least one tunneled network must be specified for the client.');
 		}
 
-		if (strlen($pconfig['endpoint']) == 0) {
-			$input_errors[] = gettext('An endpoint must be specified.');
-		} elseif (!is_hostname($pconfig['endpoint']) && !is_ipaddr($pconfig['endpoint'])) {
-			$input_errors[] = sprintf(
-				gettext('Endpoint %s must be a valid IPv4 or IPv6 address or hostname.'),
-				$pconfig['endpoint']);
-		}
-
-		/*
-		 * El puerto no es opcional: awg(8) parsea el Endpoint como host:puerto y
-		 * un archivo con solo el host se rechaza de plano -- "invalid QR code"
-		 * en el telefono--, asi que no se guarda un peer sin el.
-		 */
-		if (strlen($pconfig['port']) == 0) {
-			$input_errors[] = gettext('An endpoint port must be specified. Clients reject an endpoint without one.');
-		} elseif (!ctype_digit($pconfig['port']) || !is_port($pconfig['port'])) {
-			$input_errors[] = sprintf(gettext('Invalid endpoint port (%s).'), $pconfig['port']);
-		}
-
 		foreach (explode(',', $pconfig['dns']) as $dns) {
 			$dns = trim($dns);
 
@@ -1348,6 +1331,47 @@ function awg_client_do_peer_post($post) {
 				$input_errors[] = sprintf(gettext('MTU must be in range 1280-9000 (%s).'), $pconfig['mtu']);
 			}
 		}
+	}
+
+	/*
+	 * El Endpoint significa lo contrario en cada modo de la pagina, y por eso se
+	 * valida aca afuera y no dentro del bloque del cliente.
+	 *
+	 * Generando, es la direccion de ESTE firewall por la que el cliente disca, y
+	 * sin ella el archivo no sirve para nada: es obligatoria. Sin generar, es la
+	 * direccion del OTRO extremo, a la que este firewall disca, y es opcional:
+	 * vacia describe a un roadwarrior, que es el peer que se queda esperando y
+	 * cuya direccion se aprende del handshake que llega.
+	 *
+	 * El puerto no es opcional en ninguno de los dos casos, y por el mismo
+	 * motivo de los dos lados: awg(8) parsea el Endpoint como host:puerto. Un
+	 * archivo con solo el host se rechaza de plano --"invalid QR code" en el
+	 * telefono-- y un "awg set" con solo el host tambien, que es lo que arma
+	 * awg_resolve_endpoints() cuando el peer tiene endpoint y no tiene puerto.
+	 */
+	if ($genera) {
+		if (strlen($pconfig['endpoint']) == 0) {
+			$input_errors[] = gettext('An endpoint must be specified.');
+		}
+
+		if (strlen($pconfig['port']) == 0) {
+			$input_errors[] = gettext('An endpoint port must be specified. Clients reject an endpoint without one.');
+		}
+	} elseif ((strlen($pconfig['endpoint']) > 0) && (strlen($pconfig['port']) == 0)) {
+		$input_errors[] = gettext('An endpoint port must be specified. The backend rejects an endpoint without one. ' .
+					  'Leave both empty for a peer that dials in instead.');
+	}
+
+	if ((strlen($pconfig['endpoint']) > 0)
+	    && !is_hostname($pconfig['endpoint']) && !is_ipaddr($pconfig['endpoint'])) {
+		$input_errors[] = sprintf(
+			gettext('Endpoint %s must be a valid IPv4 or IPv6 address or hostname.'),
+			$pconfig['endpoint']);
+	}
+
+	if ((strlen($pconfig['port']) > 0)
+	    && (!ctype_digit($pconfig['port']) || !is_port($pconfig['port']))) {
+		$input_errors[] = sprintf(gettext('Invalid endpoint port (%s).'), $pconfig['port']);
 	}
 
 	if (!empty($pconfig['persistentkeepalive'])) {
@@ -1369,35 +1393,43 @@ function awg_client_do_peer_post($post) {
 	}
 
 	/*
-	 * El peer se guarda SIEMPRE sin endpoint, y eso es deliberado.
+	 * Adonde va el Endpoint depende del modo, porque la palabra significa las
+	 * dos puntas opuestas del mismo tunel.
 	 *
-	 * El campo Endpoint de esta pagina es la direccion por la que el CLIENTE
-	 * disca a este firewall. El endpoint de un peer, en WireGuard y en la
-	 * pagina nativa, significa lo contrario: donde el firewall disca AL peer.
-	 * Son la misma palabra para las dos puntas opuestas del mismo tunel.
+	 * GENERANDO, el campo es la direccion por la que el CLIENTE disca a este
+	 * firewall, y el peer se guarda SIEMPRE sin endpoint. Guardarlo ahi no da
+	 * ningun error: el .conf ni siquiera lo lleva --awg_make_tunnel_conf_file()
+	 * lo omite-- pero awg_resolve_endpoints() lo resuelve y se lo clava a la
+	 * interfaz viva con "awg set". A partir de ahi el servidor le manda la
+	 * respuesta del handshake a su propia WAN en vez de a donde esta el
+	 * cliente. El telefono se queda en "connecting" para siempre, los
+	 * contadores del peer se mueven, y no hay una sola linea de log que lo
+	 * explique. Un cliente generado es por definicion roadwarrior, asi que va
+	 * como dynamic; la direccion que necesita su archivo se guarda aparte, en
+	 * el client store de mas abajo.
 	 *
-	 * Guardarlo en el peer no da ningun error: el .conf ni siquiera lo lleva
-	 * -- awg_make_tunnel_conf_file() lo omite -- pero awg_resolve_endpoints()
-	 * lo resuelve y se lo clava a la interfaz viva con "awg set". A partir de
-	 * ahi el servidor le manda la respuesta del handshake a su propia WAN en
-	 * vez de a donde esta el cliente. El telefono se queda en "connecting" para
-	 * siempre, los contadores del peer se mueven, y no hay una sola linea de
-	 * log que lo explique.
+	 * SIN GENERAR, el campo es el endpoint del peer de siempre --el del sitio
+	 * remoto al que discamos-- y tiene que llegar al peer, que es lo unico que
+	 * hace que este firewall marque para afuera. Vacio sigue siendo dynamic,
+	 * que es el roadwarrior que se registra a mano desde su clave publica.
 	 *
-	 * Un cliente generado es por definicion roadwarrior: su direccion la
-	 * aprende el servidor del handshake que llega, y por eso va como dynamic.
-	 * La direccion que necesita el archivo del cliente se guarda aparte, en el
-	 * client store de mas abajo.
+	 * Mandar 'yes' fijo aca fue un bug: awg_do_peer_post() hace unset() del
+	 * endpoint y del puerto cuando dynamic es 'yes', asi que un peer importado
+	 * --que nace con el endpoint del servidor remoto puesto-- los perdia al
+	 * guardarlo desde esta pagina, aunque no se hubiera tocado el campo. El
+	 * tunel dejaba de discar y la pagina no decia nada.
 	 */
+	$manual_endpoint = !$genera && (strlen($pconfig['endpoint']) > 0);
+
 	$peer_post = array(
 		'index'			=> $edit_idx,
 		'enabled'		=> $pconfig['enabled'],
 		'tun'			=> $pconfig['tun'],
 		'descr'			=> $pconfig['descr'],
-		'dynamic'		=> 'yes',
-		'endpoint'		=> '',
-		'port'			=> '',
-		'persistentkeepalive'	=> null,
+		'dynamic'		=> $manual_endpoint ? 'no' : 'yes',
+		'endpoint'		=> $manual_endpoint ? $pconfig['endpoint'] : '',
+		'port'			=> $manual_endpoint ? $pconfig['port'] : '',
+		'persistentkeepalive'	=> $genera ? null : $pconfig['persistentkeepalive'],
 		'publickey'		=> $pconfig['publickey'],
 		'presharedkey'		=> empty($pconfig['presharedkey']) ? null : $pconfig['presharedkey']);
 

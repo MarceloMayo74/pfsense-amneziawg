@@ -339,9 +339,16 @@ $section->addInput(new Form_Checkbox(
 	    'configuration. Uncheck it to register a peer from a public key you were given, which is the ' .
 	    'safer practice and the only option for a site to site peer.');
 
-$group = new Form_Group('*Endpoint');
-
-$group->addClass('clientonly');
+/*
+ * El grupo se dibuja en los DOS modos, y el campo cambia de significado entre
+ * ellos: generando es la direccion de este firewall, sin generar es la del otro
+ * extremo. La ayuda la reescribe updateClientMode() para que diga cual de las
+ * dos es, porque una sola redaccion que cubra ambas no se entiende.
+ *
+ * Sin asterisco a proposito: es obligatorio solo generando. Sin generar, vacio
+ * es un peer que disca hacia aca, que es un caso legitimo y el mas comun.
+ */
+$group = new Form_Group('Endpoint');
 
 $group->add(new Form_Input(
 	'endpoint',
@@ -360,14 +367,27 @@ $group->add(new Form_Input(
  * Un select al lado del campo y no un datalist encima: un datalist filtra sus
  * sugerencias contra lo que ya este escrito, y este campo llega con algo puesto,
  * asi que el resto de la lista quedaria escondida.
+ *
+ * Este SI queda solo para el modo cliente, al reves que el campo de al lado: lo
+ * que sugiere son las direcciones de ESTE firewall, que es lo que hay que poner
+ * cuando el endpoint es adonde disca el cliente. Sin generar, el endpoint es el
+ * del otro extremo y ninguna direccion de aca sirve.
+ *
+ * La clase va en ->column y no en el select: hideClass() esconde el elemento que
+ * la lleva, y en el select dejaria colgados su label y su ayuda. ->column es el
+ * <div> que los envuelve a los tres.
  */
-$group->add(new Form_Select(
+$detected = new Form_Select(
 	'endpoint_detected',
 	'Detected',
 	'',
 	array_merge(array('' => gettext('Detected on this firewall...')),
-	            awg_client_endpoint_candidates())
-))->setHelp('Dynamic DNS hostnames and interface addresses already configured here. ' .
+	            awg_client_endpoint_candidates()));
+
+$detected->column->addClass('clientonly');
+
+$group->add($detected)
+  ->setHelp('Dynamic DNS hostnames and interface addresses already configured here. ' .
 	    'Picking one fills the endpoint. (<a href="/services_dyndns.php">' . gettext('Dynamic DNS') . '</a>)')
   ->setWidth(4);
 
@@ -380,6 +400,26 @@ $group->add(new Form_Input(
   ->setHelp('Listen port of the tunnel. Required: a client rejects an endpoint without one.')
   ->setWidth(2);
 
+/*
+ * Las dos redacciones de la ayuda, una por modo. Van por json_encode y no
+ * escritas en el javascript para que gettext las siga viendo.
+ */
+$endpoint_help = array(
+	'client' => gettext('Hostname, IPv4, or IPv6 address of this firewall as reachable by the client. ' .
+			    'This is where the client dials in, and it is written to the client file. ' .
+			    'It is not the peer endpoint: the firewall never dials a client, it learns ' .
+			    'where the client is from the handshake it receives.'),
+	'manual' => gettext('Hostname, IPv4, or IPv6 address of the remote peer, where this firewall dials out. ' .
+			    'This is the peer endpoint in the WireGuard sense, and it is what a configuration ' .
+			    'imported from another firewall or a provider fills in. ' .
+			    'Leave it empty for a peer that dials in here instead: its address is learned ' .
+			    'from the handshake it sends.'));
+
+$port_help = array(
+	'client' => gettext('Listen port of the tunnel. Required: a client rejects an endpoint without one.'),
+	'manual' => gettext('Port the remote peer listens on. Required whenever an endpoint is set: ' .
+			    'the backend rejects an endpoint without one.'));
+
 $section->add($group);
 
 $section->addInput(new Form_Input(
@@ -389,8 +429,10 @@ $section->addInput(new Form_Input(
 	$pconfig['persistentkeepalive'],
 	['placeholder' => 'Keep Alive']
 ))->addClass('trim')
-  ->setHelp('Interval (in seconds) for Keep Alive packets sent by this client.<br />
-	     Recommended for clients behind NAT. Leave blank to disable.');
+  ->setHelp('Interval (in seconds) for Keep Alive packets.<br />
+	     Generating a client, this goes in its file and the client sends them. Otherwise it is
+	     this firewall that sends them to the peer.<br />
+	     Recommended for whichever side sits behind NAT. Leave blank to disable.');
 
 $group = new Form_Group('*Client Keys');
 
@@ -599,6 +641,17 @@ $section->addInput(new Form_Input(
 ))->addClass('trim')
   ->setHelp('Optional. Filled in from the tunnel when it does not run on the default of ' .
 	    "{$awgg['default_mtu']}, which is what a client assumes on its own. Leave blank to let the client decide.");
+
+$form->add($section);
+
+/*
+ * Aplicar va en su propia seccion y no al final de la anterior, que es
+ * 'clientonly': ahi desaparecia junto con ella, y un peer site-to-site --o uno
+ * que dejo armado una importacion-- se guardaba sin poder aplicarse desde esta
+ * pagina. El cambio no se perdia, quedaba pendiente para el boton de la lista,
+ * pero no habia forma de saberlo desde aca.
+ */
+$section = new Form_Section('Apply');
 
 $section->addInput(new Form_Checkbox(
 	'applynow',
@@ -918,13 +971,24 @@ events.push(function() {
 	 * Los dos modos de la pagina. Generando, la clave publica sale del par y no
 	 * se toca a mano; en modo manual es el unico dato del otro extremo y todo
 	 * lo que describe al cliente sobra.
+	 *
+	 * El Endpoint es el unico campo que sobrevive a los dos modos cambiando de
+	 * significado --este firewall generando, el otro extremo sin generar-- asi
+	 * que se le reescribe la ayuda en vez de esconderlo.
 	 */
+	var awgEndpointHelp	= <?=json_encode($endpoint_help, $jsflags)?>;
+	var awgPortHelp		= <?=json_encode($port_help, $jsflags)?>;
+
 	function updateClientMode() {
 		var generating = $('#client_enable').prop('checked');
+		var mode = generating ? 'client' : 'manual';
 
 		hideClass('clientonly', !generating);
 
 		$('#publickey').prop('readonly', generating);
+
+		$('#endpoint').siblings('.help-block').text(awgEndpointHelp[mode]);
+		$('#port').siblings('.help-block').text(awgPortHelp[mode]);
 	}
 
 	$('#client_enable').click(updateClientMode);
