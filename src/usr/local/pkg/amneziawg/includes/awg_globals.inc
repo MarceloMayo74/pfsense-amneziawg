@@ -224,39 +224,85 @@ $awgg = array(
 	 * 'version' es el nivel de AmneziaWG que hace falta para entender el campo.
 	 * Contra un backend --o un cliente-- de un nivel menor no deben escribirse
 	 * en el .conf, por lo mismo.
+	 *
+	 * 'scope' es QUIEN tiene que estar de acuerdo, y sale de como el receptor
+	 * parsea un paquete en DeterminePacketTypeAndPadding() (device/receive.go):
+	 * identifica el tipo por el largo --su propio S mas un tamano conocido-- y
+	 * por los cuatro bytes en el offset S contra su propio rango H. Lo que no
+	 * encaja se tipa Unknown y se descarta sin decir nada. De ahi salen tres
+	 * clases:
+	 *
+	 *   'shared'  Tienen que ser IDENTICOS en las dos puntas, porque el receptor
+	 *             parsea los paquetes del otro con SUS valores. S1-S4, H1-H4,
+	 *             HeaderProtectionKey --el cifrador se arma con la clave local y
+	 *             un nonce sacado del relleno que llega-- y RandomTrailers, que
+	 *             es el menos obvio: receive.go acepta un paquete mas largo de
+	 *             lo esperado SOLO si el receptor tiene la bandera puesta.
+	 *
+	 *   'sender'  Los aplica el que envia y el otro no necesita saberlos. Los
+	 *             junk y la cadena I1-I5 se mandan antes del handshake y nunca
+	 *             se parsean del otro lado: caer en Unknown es exactamente para
+	 *             lo que existen. ContentPaddingAddition va adentro del payload
+	 *             cifrado y el receptor trunca por el largo del header IP.
+	 *
+	 *   'local'   Ni siquiera se emiten: cada lado corre con los suyos. Son los
+	 *             cinco tiempos de 3.0.
+	 *
+	 * La consecuencia practica esta en awg_client_gen_sender_obfuscation(): lo
+	 * 'sender' PUEDE diferir por cliente, y conviene que difiera. Cien clientes
+	 * emitiendo el mismo tren de basura le dan al DPI una plantilla lista para
+	 * aprender; valores distintos no le dan ninguna.
 	 */
 	'obfuscation_fields'	=> array(
-		'jc'   => array('type' => 'int',  'min' => 1, 'max' => 128,  'version' => 1),
-		'jmin' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1),
-		'jmax' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1),
-		's1'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1),
-		's2'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1),
-		's3'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2),
-		's4'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2),
-		'h1'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
-		'h2'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
-		'h3'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
-		'h4'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1),
-		'i1'   => array('type' => 'text', 'version' => 2),
-		'i2'   => array('type' => 'text', 'version' => 2),
-		'i3'   => array('type' => 'text', 'version' => 2),
-		'i4'   => array('type' => 'text', 'version' => 2),
-		'i5'   => array('type' => 'text', 'version' => 2),
+		'jc'   => array('type' => 'int',  'min' => 1, 'max' => 128,  'version' => 1, 'scope' => 'sender'),
+		'jmin' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1, 'scope' => 'sender'),
+		'jmax' => array('type' => 'int',  'min' => 1, 'max' => 1280, 'version' => 1, 'scope' => 'sender'),
+		's1'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1, 'scope' => 'shared'),
+		's2'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1, 'scope' => 'shared'),
+		's3'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2, 'scope' => 'shared'),
+		's4'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2, 'scope' => 'shared'),
+		'h1'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h2'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h3'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h4'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'i1'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
+		'i2'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
+		'i3'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
+		'i4'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
+		'i5'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
 
 		// 3.0: la clave de proteccion de headers y el relleno de contenido
-		'headerprotectionkey'	=> array('type' => 'key',   'key' => 'HeaderProtectionKey',    'version' => 3),
-		'contentpaddingaddition'=> array('type' => 'range', 'key' => 'ContentPaddingAddition', 'min' => 0, 'max' => 65535, 'version' => 3),
+		'headerprotectionkey'	=> array('type' => 'key',   'key' => 'HeaderProtectionKey',    'version' => 3, 'scope' => 'shared'),
+		'contentpaddingaddition'=> array('type' => 'range', 'key' => 'ContentPaddingAddition', 'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'sender'),
 
 		// 3.0: los tiempos del protocolo, que hasta 2.0 eran constantes
-		'rekeyaftertime'	=> array('type' => 'range', 'key' => 'RekeyAfterTime',       'min' => 0, 'max' => 65535, 'version' => 3),
-		'rekeytimeout'		=> array('type' => 'range', 'key' => 'RekeyTimeout',         'min' => 0, 'max' => 65535, 'version' => 3),
-		'rejectaftertime'	=> array('type' => 'range', 'key' => 'RejectAfterTime',      'min' => 0, 'max' => 65535, 'version' => 3),
-		'keepalivetimeout'	=> array('type' => 'range', 'key' => 'KeepaliveTimeout',     'min' => 0, 'max' => 65535, 'version' => 3),
-		'maxhandshakeattempts'	=> array('type' => 'range', 'key' => 'MaxHandshakeAttempts', 'min' => 0, 'max' => 65535, 'version' => 3),
+		'rekeyaftertime'	=> array('type' => 'range', 'key' => 'RekeyAfterTime',       'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'local'),
+		'rekeytimeout'		=> array('type' => 'range', 'key' => 'RekeyTimeout',         'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'local'),
+		'rejectaftertime'	=> array('type' => 'range', 'key' => 'RejectAfterTime',      'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'local'),
+		'keepalivetimeout'	=> array('type' => 'range', 'key' => 'KeepaliveTimeout',     'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'local'),
+		'maxhandshakeattempts'	=> array('type' => 'range', 'key' => 'MaxHandshakeAttempts', 'min' => 0, 'max' => 65535, 'version' => 3, 'scope' => 'local'),
 
 		// 3.1: los dos booleanos, que se escriben on/off y no 1/0
-		'randomtrailers'	=> array('type' => 'bool',  'key' => 'RandomTrailers',       'version' => 4),
-		'disablecookies'	=> array('type' => 'bool',  'key' => 'DisableCookies',       'version' => 4)),
+		'randomtrailers'	=> array('type' => 'bool',  'key' => 'RandomTrailers',       'version' => 4, 'scope' => 'shared'),
+		'disablecookies'	=> array('type' => 'bool',  'key' => 'DisableCookies',       'version' => 4, 'scope' => 'sender')),
+
+	/*
+	 * Los tamanos de los tres paquetes de handshake, que es contra lo que se
+	 * suma el relleno para dar el largo en el cable.
+	 *
+	 * Sirven para una sola cosa: que dos tipos de paquete no terminen midiendo
+	 * lo mismo. Si S1 + 148 da igual que S2 + 92, el init y el response vuelven
+	 * a tener el mismo largo y se recupera exactamente la firma de la que se
+	 * estaba escapando.
+	 *
+	 * Salen de MessageInitiationSize, MessageResponseSize y
+	 * MessageCookieReplySize de device/noise-protocol.go. El transporte no entra
+	 * porque su largo lo pone el payload y no es fijo.
+	 */
+	'message_sizes'		=> array(
+		'init'		=> 148,
+		'response'	=> 92,
+		'cookie'	=> 64),
 
 	/*
 	 * Los niveles de AmneziaWG, que es lo que elige el selector del tunel.

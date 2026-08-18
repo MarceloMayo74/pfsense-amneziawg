@@ -126,6 +126,7 @@ if (!function_exists('is_ipaddrv4')) {
 
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_obfuscation_pairs'));
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_obfuscation_pairs'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_build_conf'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_conf_filename'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_pick_address'));
@@ -629,6 +630,73 @@ check('sin entradas devuelve una lista vacia',
 	awg_client_config_entries('dyndnses/dyndns', 'type') === array());
 
 unset($test_config['dyndnses/dyndns']);
+
+echo "\n=== el .conf del cliente: lo suyo y lo del tunel ===\n";
+
+// El techo lo sondea el firewall; aca se fija en el maximo para no recortar nada
+if (!function_exists('awg_version_ceiling')) {
+	function awg_version_ceiling($use_cache = true) { return 4; }
+}
+
+/*
+ * Lo 'sender' sale del store del peer y lo 'shared' del tunel. Un solo campo
+ * compartido que no coincida es un handshake que no cierra, y sin error.
+ */
+$tun_obf = array(
+	'awgversion'	=> '3',
+	'jc'		=> '4',
+	'jmin'		=> '40',
+	'jmax'		=> '70',
+	's1'		=> '30',
+	's2'		=> '41',
+	's3'		=> '20',
+	's4'		=> '12',
+	'h1'		=> '100-200',
+	'h2'		=> '300-400',
+	'h3'		=> '500-600',
+	'h4'		=> '700-800',
+	'i1'		=> '<b 0xaaaa>',
+	'i2'		=> '<b 0xbbbb>',
+	'contentpaddingaddition' => '8-40',
+	'headerprotectionkey'	=> base64_encode(str_repeat("\x07", 32)));
+
+$propia = array('obfuscation' => array(
+	'jc'	=> '9',
+	'jmin'	=> '55',
+	'jmax'	=> '120',
+	'i1'	=> '<b 0xcccc>',
+	'i2'	=> '<b 0xdddd>'));
+
+$pares = awg_client_obfuscation_pairs($tun_obf, $propia);
+
+check('el tren de basura es el del cliente',
+      ($pares['Jc'] === '9') && ($pares['Jmin'] === '55') && ($pares['Jmax'] === '120'),
+      json_encode(array($pares['Jc'], $pares['Jmin'], $pares['Jmax'])));
+check('la cadena I tambien', ($pares['I1'] === '<b 0xcccc>') && ($pares['I2'] === '<b 0xdddd>'),
+      json_encode(array($pares['I1'], $pares['I2'])));
+
+check('los rellenos siguen siendo los del tunel',
+      ($pares['S1'] === '30') && ($pares['S2'] === '41') && ($pares['S3'] === '20') && ($pares['S4'] === '12'));
+check('los headers tambien',
+      ($pares['H1'] === '100-200') && ($pares['H4'] === '700-800'));
+check('y la clave de proteccion de headers tambien',
+      $pares['HeaderProtectionKey'] === $tun_obf['headerprotectionkey']);
+
+/*
+ * ContentPaddingAddition es 'sender' pero no se sortea por cliente. Si el
+ * merge reemplazara el bloque entero en vez de campo por campo, uno puesto a
+ * mano en el tunel se perderia.
+ */
+check('un ContentPaddingAddition del tunel no se pierde',
+      $pares['ContentPaddingAddition'] === '8-40',
+      var_export($pares['ContentPaddingAddition'] ?? null, true));
+
+// Un peer de antes de esto, sin nada guardado, cae en la del tunel
+$viejo = awg_client_obfuscation_pairs($tun_obf, array());
+
+check('un peer sin ofuscacion propia usa la del tunel entera',
+      $viejo === awg_obfuscation_pairs($tun_obf), json_encode($viejo));
+check('o sea el Jc del tunel', $viejo['Jc'] === '4');
 
 printf("\n%d pasaron, %d fallaron\n\n", $pass, $fail);
 

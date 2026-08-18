@@ -56,8 +56,11 @@ preg_match("/'header_protection_min_padding'\s*=>\s*(\d+)/", $globals, $hp_min);
  */
 preg_match("/'timing_defaults'\s*=>\s*array\((.*?)\),/s", $globals, $timings);
 
-if (empty($fields) || empty($mask) || empty($range_mask) || empty($hp_min) || empty($timings)) {
-	fwrite(STDERR, "Falta algo en awg_globals.inc: obfuscation_fields, header_mask, range_mask, header_protection_min_padding o timing_defaults\n");
+// Sin esto awg_break_size_collisions() se sale por su guarda y no compara nada
+preg_match("/'message_sizes'\s*=>\s*array\((.*?)\),/s", $globals, $sizes);
+
+if (empty($fields) || empty($mask) || empty($range_mask) || empty($hp_min) || empty($timings) || empty($sizes)) {
+	fwrite(STDERR, "Falta algo en awg_globals.inc: obfuscation_fields, header_mask, range_mask, header_protection_min_padding, timing_defaults o message_sizes\n");
 	exit(2);
 }
 
@@ -72,7 +75,8 @@ if (empty($versions)) {
 eval('$awgg = array(' . rtrim($fields[0], ',') . ', ' . rtrim($versions[0], ',') .
      ", 'header_mask' => '{$mask[1]}', 'range_mask' => '{$range_mask[1]}'" .
      ", 'header_protection_min_padding' => {$hp_min[1]}" .
-     ", 'timing_defaults' => array({$timings[1]}));");
+     ", 'timing_defaults' => array({$timings[1]})" .
+     ", 'message_sizes' => array({$sizes[1]}));");
 
 /*
  * El techo depende de una sonda al backend, que fuera del firewall no existe.
@@ -89,6 +93,7 @@ function awg_version_ceiling($use_cache = true) {
 eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_headers'));
+eval(extract_function("{$src}/awg_api.inc", 'awg_break_size_collisions'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_obfuscation'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_junk_payload'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_junk_payload'));
@@ -292,6 +297,124 @@ $h = awg_gen_headers();
 check('lo que sortea pasa su propia validacion',
       count(awg_validate_obfuscation(pc($h))) === 0,
       json_encode(awg_validate_obfuscation(pc($h))));
+
+echo "\n=== awg_gen_headers: rangos de 2.0 en adelante ===\n";
+
+/*
+ * Un header fijo son cuatro bytes constantes en cada paquete de datos, que es
+ * una firma por si sola. De 2.0 en adelante el nivel permite un rango y cada
+ * paquete elige adentro -- UintRange.PickOne() en device/noise-types.go.
+ */
+$sueltos = $solapan = $fuera = $invertidos = 0;
+$por_banda = array();
+
+for ($i = 0; $i < 400; $i++) {
+	$h = awg_gen_headers(2);
+
+	$rangos = array();
+
+	foreach ($h as $name => $v) {
+		if (strpos((string) $v, '-') === false) {
+			$sueltos++;
+
+			continue;
+		}
+
+		[$lo, $hi] = awg_header_bounds($v);
+
+		if ($hi <= $lo) {
+			$invertidos++;
+		}
+
+		if (($lo < 5) || ($hi > 4294967295)) {
+			$fuera++;
+		}
+
+		$rangos[$name] = array($lo, $hi);
+
+		// En que cuarto del espacio cayo, para ver que no sea siempre el mismo
+		$por_banda[$name][intdiv($lo, 1073741824)] = true;
+	}
+
+	foreach ($rangos as $a => $ra) {
+		foreach ($rangos as $b => $rb) {
+			if (($a < $b) && ($ra[0] <= $rb[1]) && ($rb[0] <= $ra[1])) {
+				$solapan++;
+			}
+		}
+	}
+}
+
+check('400 sorteos: los cuatro son rangos', $sueltos === 0, "sueltos={$sueltos}");
+check('400 sorteos: ninguno invertido', $invertidos === 0, "invertidos={$invertidos}");
+check('400 sorteos: ninguno fuera de 5..4294967295', $fuera === 0, "fuera={$fuera}");
+check('400 sorteos: ningun par se solapa', $solapan === 0, "solapados={$solapan}");
+
+/*
+ * Que banda le toca a cual se sortea. Si H1 cayera siempre en la mas baja y H4
+ * en la mas alta, el orden entre los cuatro seria en si mismo un patron.
+ */
+$fijos = 0;
+
+foreach ($por_banda as $name => $bandas) {
+	if (count($bandas) < 2) {
+		$fijos++;
+	}
+}
+
+check('y ninguno cae siempre en la misma banda', $fijos === 0, "fijos={$fijos}");
+
+check('en 1.x siguen siendo valores sueltos, que es lo que ese nivel entiende',
+      strpos((string) awg_gen_headers(1)['h1'], '-') === false);
+
+check('un tunel 2.0 entero pasa su propia validacion',
+      count(awg_validate_obfuscation(pc(awg_gen_obfuscation(2)))) === 0,
+      json_encode(awg_validate_obfuscation(pc(awg_gen_obfuscation(2)))));
+
+echo "\n=== que dos tipos de paquete no midan lo mismo ===\n";
+
+/*
+ * El relleno se suma al tamano del mensaje: init 148, response 92, cookie 64.
+ * Si dos totales coinciden, esos dos tipos vuelven a tener el mismo largo en el
+ * cable y se recupera la firma de la que se estaba escapando. Venia mirandose
+ * solo el par init/response.
+ */
+$tam = array('s1' => 148, 's2' => 92, 's3' => 64);
+
+$choques = 0;
+
+for ($i = 0; $i < 400; $i++) {
+	$g = awg_gen_obfuscation(2);
+
+	$largos = array();
+
+	foreach ($tam as $campo => $base) {
+		$largos[$campo] = (int) $g[$campo] + $base;
+	}
+
+	foreach ($largos as $a => $la) {
+		foreach ($largos as $b => $lb) {
+			if (($a < $b) && ($la === $lb)) {
+				$choques++;
+			}
+		}
+	}
+}
+
+check('400 tuneles 2.0: ningun par de tipos mide igual', $choques === 0, "choques={$choques}");
+
+// Y los tres pares a mano, con los valores que chocan exactamente
+check('S2 = S1 + 56 se corrige',
+      awg_break_size_collisions(array('s1' => '30', 's2' => '86'))['s2'] !== '86');
+check('S3 = S1 + 84 se corrige',
+      awg_break_size_collisions(array('s1' => '30', 's2' => '40', 's3' => '114'))['s3'] !== '114');
+check('S3 = S2 + 28 se corrige',
+      awg_break_size_collisions(array('s1' => '30', 's2' => '40', 's3' => '68'))['s3'] !== '68');
+check('lo que no choca no se toca',
+      awg_break_size_collisions(array('s1' => '30', 's2' => '40', 's3' => '50'))
+      === array('s1' => '30', 's2' => '40', 's3' => '50'));
+check('sin S3 --nivel 1.x-- no rompe',
+      awg_break_size_collisions(array('s1' => '30', 's2' => '40')) === array('s1' => '30', 's2' => '40'));
 
 printf("\n=== el nivel de AmneziaWG del tunel ===\n\n");
 

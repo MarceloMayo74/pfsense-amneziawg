@@ -512,7 +512,81 @@ function awg_client_conf_from_peer($peer_idx, &$error = null) {
 		'endpoint'		=> awg_client_format_endpoint($store['endpoint'] ?? '',
 		                                              $store['port'] ?? ''),
 		'persistentkeepalive'	=> $store['persistentkeepalive'] ?? 0,
-		'obfuscation'		=> awg_obfuscation_pairs($tunnel)), $error);
+		'obfuscation'		=> awg_client_obfuscation_pairs($tunnel, $store)), $error);
+}
+
+/*
+ * Sortea la ofuscacion propia de UN cliente.
+ *
+ * Solo los campos 'sender' de obfuscation_fields, que son los que el que envia
+ * aplica y el otro extremo no necesita saber: el tren de basura y la cadena
+ * I1-I5. Todo lo 'shared' --S1-S4, H1-H4, la clave de headers-- sigue saliendo
+ * del tunel, porque ahi un valor distinto no es variedad sino un handshake que
+ * no cierra.
+ *
+ * Para que: si diez clientes del mismo tunel emiten el mismo tren de basura,
+ * con la misma cuenta y los mismos tamanos, eso ES una plantilla y un DPI la
+ * aprende de una. Diez trenes distintos no le dan ninguna. El archivo de cada
+ * peer se arma aparte, asi que darle lo suyo a cada uno no cuesta nada.
+ *
+ * La cadena I1-I5 se sortea SOLO en los slots que el tunel ya usa. Un tunel sin
+ * cadena la dejo vacia a proposito --o su nivel no la tiene-- y no es este el
+ * lugar para agregarsela por la ventana.
+ */
+function awg_client_gen_sender_obfuscation($tunnel) {
+	$version = awg_tunnel_version($tunnel);
+
+	$jmin = random_int(40, 96);
+
+	$gen = array(
+		'jc'	=> (string) random_int(3, 8),
+		'jmin'	=> (string) $jmin,
+		'jmax'	=> (string) ($jmin + random_int(24, 96)));
+
+	if ($version < 2) {
+		return $gen;
+	}
+
+	foreach (array('i1', 'i2', 'i3', 'i4', 'i5') as $slot) {
+		if (trim((string) ($tunnel[$slot] ?? '')) === '') {
+			continue;
+		}
+
+		$gen[$slot] = awg_gen_junk_payload();
+	}
+
+	return $gen;
+}
+
+/*
+ * Los pares de ofuscacion que van al .conf de UN cliente: los del tunel, con lo
+ * 'sender' pisado por lo que se le sorteo a este peer.
+ *
+ * Se pisa campo por campo y solo los que el store tiene guardados. Reemplazar
+ * el bloque 'sender' entero borraria un ContentPaddingAddition puesto a mano en
+ * el tunel, que tambien es 'sender' pero no se sortea por cliente.
+ *
+ * Un peer sin nada guardado --los de antes de esto-- cae en la ofuscacion del
+ * tunel, que es como venia funcionando.
+ */
+function awg_client_obfuscation_pairs($tunnel, $store) {
+	global $awgg;
+
+	$propia = $store['obfuscation'] ?? array();
+
+	if (!is_array($propia) || empty($propia)) {
+		return awg_obfuscation_pairs($tunnel);
+	}
+
+	foreach ($awgg['obfuscation_fields'] as $field => $spec) {
+		if ((($spec['scope'] ?? '') !== 'sender') || !array_key_exists($field, $propia)) {
+			continue;
+		}
+
+		$tunnel[$field] = $propia[$field];
+	}
+
+	return awg_obfuscation_pairs($tunnel);
 }
 
 /*
@@ -1485,6 +1559,24 @@ function awg_client_do_peer_post($post) {
 		 * Sin generacion se guarda vacio, que es lo que apaga la exportacion de
 		 * un peer que antes la tenia.
 		 */
+		/*
+		 * La ofuscacion propia del cliente se sortea UNA vez, al crearlo, y de
+		 * ahi en mas se conserva. Volver a sortearla en cada guardado le
+		 * cambiaria los parametros al archivo que ya se entrego, y aunque el
+		 * tunel seguiria funcionando --son campos de emisor, nadie los tiene que
+		 * hacer coincidir-- el archivo en mano dejaria de ser el que muestra
+		 * esta pagina.
+		 */
+		$previa = awg_client_store(config_get_path("installedpackages/amneziawg/peers/item/{$peer_idx}", array()));
+
+		$sender = $previa['obfuscation'] ?? null;
+
+		if (!is_array($sender) || empty($sender)) {
+			[$t_idx, $tunnel_actual, $t_new] = awg_tunnel_get_config_by_name($pconfig['tun']);
+
+			$sender = $tunnel_actual ? awg_client_gen_sender_obfuscation($tunnel_actual) : array();
+		}
+
 		$saved = awg_client_save_store($peer_idx, $genera ? array(
 			'privatekey'		=> $pconfig['privatekey'],
 			'address'		=> awg_client_addresses_to_line($addresses),
@@ -1494,6 +1586,7 @@ function awg_client_do_peer_post($post) {
 			'port'			=> $pconfig['port'],
 			'routing'		=> $pconfig['routing'],
 			'allowedips'		=> awg_client_addresses_to_line($client_allowedips),
+			'obfuscation'		=> $sender,
 			'persistentkeepalive'	=> $pconfig['persistentkeepalive']) : array());
 
 		/*

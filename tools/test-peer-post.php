@@ -145,6 +145,39 @@ function awg_client_save_store($idx, $data) {
 	return true;
 }
 
+/*
+ * Lo guardado de antes. Vacio por defecto: cada corrida es un peer nuevo, que
+ * es cuando se sortea la ofuscacion propia del cliente.
+ */
+$GLOBALS['store_previo'] = array();
+
+function awg_client_store($peer) {
+	return $GLOBALS['store_previo'];
+}
+
+function config_get_path($path, $default = null) { return $default; }
+
+function awg_tunnel_get_config_by_name($name) {
+	return array(0, $GLOBALS['tunnel'], false);
+}
+
+function awg_tunnel_version($tunnel, $ceiling = null) {
+	return (int) ($tunnel['awgversion'] ?? 2);
+}
+
+// El sorteo de verdad vive en awg_api.inc; aca alcanza con que sea distinto
+function awg_gen_junk_payload() {
+	return sprintf('<b 0x%s><r %d>', bin2hex(random_bytes(3)), random_int(8, 64));
+}
+
+// El tunel al que pertenecen los peers de esta corrida
+$GLOBALS['tunnel'] = array(
+	'name'		=> 'tun9000',
+	'awgversion'	=> '2',
+	'i1'		=> '<b 0xdeadbeef><r 16>',
+	'i2'		=> '<t><rc 8>');
+
+eval(extract_function("{$src}/awg_client.inc", 'awg_client_gen_sender_obfuscation'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_do_peer_post'));
 
 $pass = $fail = 0;
@@ -239,6 +272,77 @@ check('el endpoint va al archivo del cliente',
       ($GLOBALS['store_visto']['endpoint'] ?? null) === 'mifirewall.dyndns.org');
 check('y el keepalive tambien',
       ($GLOBALS['store_visto']['persistentkeepalive'] ?? null) === '25');
+
+echo "\n=== cada cliente lleva su propia ofuscacion de emisor ===\n";
+
+/*
+ * Jc, Jmin, Jmax y la cadena I1-I5 son de emisor: el otro extremo no los tiene
+ * que hacer coincidir. Si diez clientes del mismo tunel emiten el mismo tren de
+ * basura, eso ES una plantilla y el DPI la aprende de una.
+ *
+ * Lo 'shared' --S1-S4, H1-H4, la clave de headers-- no se toca: ahi un valor
+ * distinto no es variedad, es un handshake que no cierra.
+ */
+function cliente_nuevo() {
+	$GLOBALS['store_previo'] = array();
+
+	correr(post_base(array(
+		'client_enable'		=> 'yes',
+		'privatekey'		=> base64_encode(random_bytes(32)),
+		'endpoint'		=> 'mifirewall.dyndns.org',
+		'port'			=> '51820',
+		'client_allowedips'	=> '0.0.0.0/0')));
+
+	return $GLOBALS['store_visto']['obfuscation'] ?? null;
+}
+
+$a = cliente_nuevo();
+
+check('se le guarda ofuscacion propia', is_array($a) && !empty($a), json_encode($a));
+check('con el tren de basura', isset($a['jc'], $a['jmin'], $a['jmax']), json_encode($a));
+check('y jmin no pasa a jmax', (int) $a['jmin'] <= (int) $a['jmax'], json_encode($a));
+
+// Los slots I que el tunel usa, y solo esos
+check('sortea I1 e I2, que son los que el tunel usa', isset($a['i1'], $a['i2']), json_encode($a));
+check('y no inventa I3, I4 ni I5 que el tunel dejo vacios',
+      !isset($a['i3']) && !isset($a['i4']) && !isset($a['i5']), json_encode($a));
+check('los suyos no son los del tunel',
+      $a['i1'] !== $GLOBALS['tunnel']['i1'], $a['i1']);
+
+// Nada compartido se toca aca
+foreach (array('s1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4', 'headerprotectionkey') as $shared) {
+	if (isset($a[$shared])) {
+		$compartido_filtrado = true;
+	}
+}
+
+check('no se le guarda nada compartido', !isset($compartido_filtrado), json_encode($a));
+
+// Dos clientes del mismo tunel no comparten molde
+$b = cliente_nuevo();
+$c = cliente_nuevo();
+
+check('dos clientes distintos reciben trenes distintos',
+      json_encode($b) !== json_encode($c), json_encode($b) . ' vs ' . json_encode($c));
+
+/*
+ * Y una vez sorteada NO se vuelve a sortear: el archivo ya entregado dejaria de
+ * ser el que muestra la pagina.
+ */
+$GLOBALS['store_previo'] = array('obfuscation' => array('jc' => '7', 'jmin' => '50', 'jmax' => '90'));
+
+correr(post_base(array(
+	'client_enable'		=> 'yes',
+	'privatekey'		=> $clave_priv,
+	'endpoint'		=> 'mifirewall.dyndns.org',
+	'port'			=> '51820',
+	'client_allowedips'	=> '0.0.0.0/0')));
+
+check('editar un cliente existente conserva la suya',
+      ($GLOBALS['store_visto']['obfuscation']['jc'] ?? null) === '7',
+      json_encode($GLOBALS['store_visto']['obfuscation'] ?? null));
+
+$GLOBALS['store_previo'] = array();
 
 echo "\n=== el gateway, que solo existe discando ===\n";
 

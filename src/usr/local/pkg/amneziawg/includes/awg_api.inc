@@ -952,6 +952,56 @@ function awg_obfuscation_pairs($tunnel, $ceiling = null) {
 }
 
 /*
+ * Corre los rellenos lo justo para que ningun par de tipos de paquete mida lo
+ * mismo en el cable.
+ *
+ * Se compara el largo TOTAL --relleno mas tamano del mensaje-- de a pares, y al
+ * que choca se le suma uno. Un byte alcanza: lo que hay que romper es la
+ * igualdad, no alejarse de ella.
+ *
+ * Se toca siempre el de mas arriba del par y nunca S1, para que el arreglo sea
+ * determinista y no pueda deshacer uno anterior: corregir S3 no vuelve a poner
+ * en riesgo el par S1/S2 que ya se reviso.
+ */
+function awg_break_size_collisions($gen) {
+	global $awgg;
+
+	$size = $awgg['message_sizes'] ?? array();
+
+	foreach (array('init', 'response', 'cookie') as $mensaje) {
+		if (!isset($size[$mensaje])) {
+			return $gen;
+		}
+	}
+
+	/*
+	 * Los largos se recalculan despues de cada correccion y no se cachean en un
+	 * closure. Una arrow function captura POR VALOR: con fn() adentro, corregir
+	 * S2 no cambiaba el largo que veia la comparacion siguiente, y el segundo
+	 * par se comparaba contra el valor viejo.
+	 */
+	$init = (int) ($gen['s1'] ?? 0) + $size['init'];
+
+	if (((int) ($gen['s2'] ?? 0) + $size['response']) === $init) {
+		$gen['s2'] = (string) ((int) $gen['s2'] + 1);
+	}
+
+	if (!isset($gen['s3'])) {
+		return $gen;
+	}
+
+	$response = (int) $gen['s2'] + $size['response'];
+
+	foreach (array($init, $response) as $otro) {
+		if (((int) $gen['s3'] + $size['cookie']) === $otro) {
+			$gen['s3'] = (string) ((int) $gen['s3'] + 1);
+		}
+	}
+
+	return $gen;
+}
+
+/*
  * Sortea H1-H4 para un tunel nuevo.
  *
  * Los headers no tienen default: un valor fijo seria una firma nueva, que es
@@ -967,26 +1017,65 @@ function awg_obfuscation_pairs($tunnel, $ceiling = null) {
  *   - Sin solaparse entre ellos. mergeWithDevice() los compara de a pares y
  *     rechaza el setconf entero con "headers must not overlap".
  *
- * Se sortean valores sueltos y no rangos: cuatro enteros distintos no se
- * pueden solapar, y el sorteo por tunel ya aporta la variabilidad que los
- * rangos buscan.
+ * De 2.0 en adelante se sortean RANGOS y no valores sueltos, que es lo que el
+ * nivel agrega: con un rango, cada paquete elige su header al azar adentro
+ * --UintRange.PickOne() en device/noise-types.go-- en vez de repetir el mismo
+ * numero siempre. Importa sobre todo en H4: un valor fijo son cuatro bytes
+ * constantes en CADA paquete de datos, que es una firma por si sola.
+ *
+ * En 1.x se sortean valores sueltos porque el rango no existe todavia: ahi
+ * u32_range_from_string() no esta y un 'lo-hi' no lo entiende nadie.
+ *
+ * Los cuatro salen de bandas disjuntas del espacio de 32 bits, y esa es la
+ * forma barata de garantizar que no se solapen sin tener que reintentar. Que
+ * banda le toca a cual se sortea tambien: si H1 cayera siempre en la banda mas
+ * baja y H4 en la mas alta, el orden entre ellos seria en si mismo algo que
+ * mirar.
  */
-function awg_gen_headers() {
+function awg_gen_headers($version = 1) {
 	global $awgg;
 
-	$headers = array();
+	$names = array('h1', 'h2', 'h3', 'h4');
 
-	foreach (array('h1', 'h2', 'h3', 'h4') as $header) {
-		$spec = $awgg['obfuscation_fields'][$header];
+	$spec = $awgg['obfuscation_fields']['h1'];
 
-		do {
-			$candidate = random_int($spec['min'], $spec['max']);
-		} while (in_array($candidate, $headers, true));
+	if ($version < 2) {
+		$headers = array();
 
-		$headers[$header] = $candidate;
+		foreach ($names as $header) {
+			do {
+				$candidate = random_int($spec['min'], $spec['max']);
+			} while (in_array($candidate, $headers, true));
+
+			$headers[$header] = $candidate;
+		}
+
+		return $headers;
 	}
 
-	return $headers;
+	/*
+	 * Cuatro bandas iguales, y adentro de cada una un rango que no la llena: se
+	 * deja el arranque en el primer tercio y el ancho hasta la mitad de lo que
+	 * queda, asi ni el piso ni el techo de la banda quedan pegados al borde --
+	 * que volveria a ser un numero predecible.
+	 */
+	$band = intdiv($spec['max'] - $spec['min'], count($names));
+
+	$bands = array();
+
+	for ($i = 0; $i < count($names); $i++) {
+		$floor = $spec['min'] + ($i * $band);
+
+		$lo = random_int($floor, $floor + intdiv($band, 3));
+
+		$room = ($floor + $band - 1) - $lo;
+
+		$bands[] = sprintf('%d-%d', $lo, $lo + random_int(intdiv($room, 8), intdiv($room, 2)));
+	}
+
+	shuffle($bands);
+
+	return array_combine($names, $bands);
 }
 
 /*
@@ -1036,9 +1125,18 @@ function awg_gen_obfuscation($version = 1) {
 		's1'	=> (string) random_int(15, 64),
 		's2'	=> (string) random_int(15, 64));
 
+	if ($version >= 2) {
+		$gen['s3'] = (string) random_int(15, 64);
+		$gen['s4'] = '0';
+	}
+
 	/*
-	 * Que S1 + 148 no de lo mismo que S2 + 92, o sea que un init y un response
-	 * no midan igual en el cable.
+	 * Que dos tipos de paquete no midan lo mismo en el cable.
+	 *
+	 * El relleno se suma al tamano del mensaje, asi que S1 + 148, S2 + 92 y
+	 * S3 + 64 pueden coincidir de a pares. Cuando coinciden, esos dos tipos
+	 * vuelven a tener el mismo largo y se recupera exactamente la firma de la
+	 * que se estaba escapando.
 	 *
 	 * Contra ESTE backend no hace falta: DeterminePacketTypeAndPadding() prueba
 	 * los tipos en orden y desempata por el header --que ya validamos que no se
@@ -1046,15 +1144,11 @@ function awg_gen_obfuscation($version = 1) {
 	 * porque no cuesta nada, porque el otro extremo puede ser otra
 	 * implementacion, y porque un tunel que no levanta por esto no da ningun
 	 * error que lo diga.
+	 *
+	 * Venia mirando solo el par init/response. Los otros dos existen desde que
+	 * S3 existe, o sea desde 2.0, y no se estaban mirando.
 	 */
-	if (((int) $gen['s1'] + 148) === ((int) $gen['s2'] + 92)) {
-		$gen['s2'] = (string) ((int) $gen['s2'] + 1);
-	}
-
-	if ($version >= 2) {
-		$gen['s3'] = (string) random_int(15, 64);
-		$gen['s4'] = '0';
-	}
+	$gen = awg_break_size_collisions($gen);
 
 	/*
 	 * De 3.0 en adelante S4 no puede quedar en cero, y no es una preferencia:
@@ -1072,7 +1166,7 @@ function awg_gen_obfuscation($version = 1) {
 		$gen['s4'] = (string) random_int($min, $min * 2);
 	}
 
-	foreach (awg_gen_headers() as $header => $value) {
+	foreach (awg_gen_headers($version) as $header => $value) {
 		$gen[$header] = (string) $value;
 	}
 
