@@ -895,6 +895,26 @@ function awg_tunnel_version($tunnel, $ceiling = null) {
 }
 
 /*
+ * El escalon mas bajo que este paquete todavia ofrece.
+ *
+ * Los que ya no se ofrecen siguen en la tabla y se siguen entendiendo --un
+ * tunel guardado en uno de ellos tiene que poder editarse-- pero nada nuevo
+ * deberia nacer ahi.
+ */
+function awg_lowest_offered_version() {
+	global $awgg;
+
+	foreach ($awgg['awg_versions'] as $level => $meta) {
+		if ($meta['offered'] ?? true) {
+			return $level;
+		}
+	}
+
+	// Todos marcados como no ofrecidos no deberia pasar; el mas bajo sirve igual
+	return (int) array_key_first($awgg['awg_versions']);
+}
+
+/*
  * Compatibilidad: quedaba escrito en varios lados y dice menos que la version.
  */
 function awg_backend_supports_awg2($use_cache = true) {

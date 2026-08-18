@@ -460,13 +460,30 @@ $awg4 = ($ceiling >= 4);
 
 $version_options = array();
 
+/*
+ * Un escalon con 'offered' en false no se le propone mas a nadie, pero se sigue
+ * ofreciendo al tunel que YA esta en el: sacarselo del desplegable lo mostraria
+ * parado en otro nivel, y el primer guardado lo subiria sin que nadie lo pida.
+ * Subir de nivel a un tunel que habla con un extremo viejo es romperlo.
+ */
 foreach ($awgg['awg_versions'] as $level => $meta) {
-	if ($level <= $ceiling) {
+	if ($level > $ceiling) {
+		continue;
+	}
+
+	if (($meta['offered'] ?? true) || ($level == $awg_version)) {
 		$version_options[$level] = $meta['label'];
 	}
 }
 
 $version_help = gettext('What the <b>weakest end</b> of this tunnel understands — not what this firewall supports. Anything above the level you pick is left out of both configuration files, even if it has a value stored.');
+
+if (!($awgg['awg_versions'][$awg_version]['offered'] ?? true)) {
+	$version_help .= '<br />' . sprintf(
+		gettext('<b>%s</b> is no longer offered for new tunnels, and this one is still on it. ' .
+			'It is kept so the tunnel stays editable; moving it up is safe only if the other end understands the higher level.'),
+		$awgg['awg_versions'][$awg_version]['label']);
+}
 
 foreach ($awgg['awg_versions'] as $level => $meta) {
 	if ($level <= $ceiling) {

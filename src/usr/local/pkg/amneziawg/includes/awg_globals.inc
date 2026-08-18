@@ -324,11 +324,24 @@ $awgg = array(
 	 * RandomTrailers, exactamente como uno de 1.x lo rechaza al ver S3. El
 	 * escalon existe para poder decir "hasta aca entiende el otro extremo", no
 	 * para describir el backend.
+	 *
+	 * Los numeros NO se renumeran nunca, aunque un escalon deje de ofrecerse:
+	 * son lo que quedo guardado en cada tunel, y correrlos reinterpretaria en
+	 * silencio la configuracion de todos los que ya existen.
+	 *
+	 * 'offered' en false es un escalon que no se le propone mas a nadie pero que
+	 * se sigue entendiendo. Sacar la entrada de la tabla no es lo mismo:
+	 * awg_validate_obfuscation() rechaza un nivel que no conoce, asi que un
+	 * tunel viejo quedaria imposible de volver a guardar, y awg_import_level()
+	 * podria calcular un nivel que ya no existe.
 	 */
 	'awg_versions'	=> array(
 		1 => array(
 			'label' => 'AmneziaWG 1.x',
-			'descr' => 'Jc, Jmin, Jmax, S1, S2 y H1-H4. Lo entiende cualquier cliente de AmneziaWG.'),
+			'offered' => false,
+			'descr' => 'Jc, Jmin, Jmax, S1, S2 y H1-H4. Sin S3/S4, sin I1-I5 y con headers ' .
+				   'de valor fijo. Ya no se ofrece: la app estable de Android es 2.0.x ' .
+				   'desde hace tiempo y no queda cliente en uso que se quede aca.'),
 		2 => array(
 			'label' => 'AmneziaWG 2.0',
 			'descr' => 'Agrega S3, S4 e I1-I5. Es lo que entiende la app estable de Android (2.0.x).'),

@@ -57,6 +57,15 @@ $test_if = 'tun9000';
 $test_port = 51820;
 
 function awg_version_ceiling($use_cache = true) { global $test_ceiling; return $test_ceiling; }
+
+/*
+ * El piso del selector. 1.x sigue entendiendose --un tunel guardado ahi tiene
+ * que poder editarse-- pero ya no se ofrece, asi que una importacion no puede
+ * dejar un tunel nuevo en ese escalon.
+ */
+$test_floor = 2;
+
+function awg_lowest_offered_version() { global $test_floor; return $test_floor; }
 function next_awg_if() { global $test_if; return $test_if; }
 function next_awg_port() { global $test_port; return $test_port; }
 
@@ -232,6 +241,31 @@ check('y se topea con lo que el firewall alcanza', $built_2['tunnel']['awgversio
 check('pero los valores igual se guardan, para cuando el techo suba',
       $built_2['tunnel']['headerprotectionkey'] === $hpk);
 $test_ceiling = 4;
+
+/*
+ * Un .conf viejo --sin S3/S4 ni I1-I5-- calcula nivel 1, que ya no se ofrece.
+ * No puede quedar ahi: subirlo no cambia lo que se escribe, porque
+ * awg_obfuscation_pairs() saltea los campos vacios de todas formas.
+ */
+$viejo = awg_import_parse("[Interface]\nPrivateKey = {$clave_a}\nJc = 4\nJmin = 40\nJmax = 70\n" .
+			  "S1 = 30\nS2 = 41\nH1 = 100\nH2 = 200\nH3 = 300\nH4 = 400\n\n" .
+			  "[Peer]\nPublicKey = {$clave_b}\nAllowedIPs = 10.0.0.2/32\n", $e_viejo);
+
+$built_viejo = awg_import_build($viejo, '', $e_viejo);
+
+check('un archivo 1.x no deja el tunel en un escalon que ya no se ofrece',
+      $built_viejo['tunnel']['awgversion'] === '2', $built_viejo['tunnel']['awgversion']);
+check('y lo que el archivo traia sigue estando',
+      $built_viejo['tunnel']['jc'] === '4' && $built_viejo['tunnel']['s1'] === '30');
+check('sin inventar los campos que no traia',
+      ($built_viejo['tunnel']['s3'] === '') && ($built_viejo['tunnel']['i1'] === ''));
+
+// Y si el piso bajara, el nivel del archivo se respeta como antes
+$test_floor = 1;
+$built_piso = awg_import_build($viejo, '', $e_piso);
+check('con el piso en 1 vuelve a respetarse el nivel del archivo',
+      $built_piso['tunnel']['awgversion'] === '1', $built_piso['tunnel']['awgversion']);
+$test_floor = 2;
 
 echo "\n=== el peer que sale ===\n";
 
