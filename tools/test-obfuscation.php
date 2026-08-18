@@ -50,8 +50,14 @@ preg_match("/'header_mask'\s*=>\s*'([^']+)'/", $globals, $mask);
 preg_match("/'range_mask'\s*=>\s*'([^']+)'/", $globals, $range_mask);
 preg_match("/'header_protection_min_padding'\s*=>\s*(\d+)/", $globals, $hp_min);
 
-if (empty($fields) || empty($mask) || empty($range_mask) || empty($hp_min)) {
-	fwrite(STDERR, "Falta algo en awg_globals.inc: obfuscation_fields, header_mask, range_mask o header_protection_min_padding\n");
+/*
+ * Sin esto awg_validate_timings() se sale por su guarda y las 25 comprobaciones
+ * de aca abajo pasan sin haber ejercitado el final de awg_validate_obfuscation().
+ */
+preg_match("/'timing_defaults'\s*=>\s*array\((.*?)\),/s", $globals, $timings);
+
+if (empty($fields) || empty($mask) || empty($range_mask) || empty($hp_min) || empty($timings)) {
+	fwrite(STDERR, "Falta algo en awg_globals.inc: obfuscation_fields, header_mask, range_mask, header_protection_min_padding o timing_defaults\n");
 	exit(2);
 }
 
@@ -65,7 +71,8 @@ if (empty($versions)) {
 
 eval('$awgg = array(' . rtrim($fields[0], ',') . ', ' . rtrim($versions[0], ',') .
      ", 'header_mask' => '{$mask[1]}', 'range_mask' => '{$range_mask[1]}'" .
-     ", 'header_protection_min_padding' => {$hp_min[1]});");
+     ", 'header_protection_min_padding' => {$hp_min[1]}" .
+     ", 'timing_defaults' => array({$timings[1]}));");
 
 /*
  * El techo depende de una sonda al backend, que fuera del firewall no existe.
@@ -86,6 +93,10 @@ eval(extract_function("{$src}/awg_api.inc", 'awg_gen_obfuscation'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_gen_junk_payload'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_junk_payload'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_obfuscation'));
+
+// La llama awg_validate_obfuscation() al final; las relaciones entre los cinco
+// tiempos las prueba tools/test-timings.php.
+eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_timings'));
 
 $pass = $fail = 0;
 

@@ -750,7 +750,15 @@ if ($awg3) {
 	}
 
 	$group->addClass('awg-v3-only')
-	      ->setHelp(gettext('Seconds, or a range such as 100-140; the last one is a count. <b>Both ends must agree</b>, and leaving them empty keeps WireGuard\'s own values — which is what everyone else uses, so changing them is only worth it when the timing itself is what gives the tunnel away.'));
+	      ->setHelp(sprintf(gettext('Seconds, or a range such as 100-140; the last one is a count. <b>These are local</b> — each end reads its own and none of them travel in the handshake, so the two sides do not have to match. ' .
+			'Leaving them empty keeps WireGuard\'s own values (%1$d, %2$d, %3$d, %4$d and %5$d), which is what everyone else uses, so changing them is only worth it when the timing itself is what gives the tunnel away. ' .
+			'A plain <b>0 means empty</b>, not zero: the backend reads it as "unset" and falls back to the same defaults.<br />' .
+			'Two of them constrain each other on this side: RejectAfterTime has to stay above KeepaliveTimeout + RekeyTimeout, and RekeyAfterTime below RejectAfterTime. The backend checks neither, and getting either wrong costs throughput without ever looking like a configuration error.'),
+			$awgg['timing_defaults']['rekeyaftertime'],
+			$awgg['timing_defaults']['rekeytimeout'],
+			$awgg['timing_defaults']['rejectaftertime'],
+			$awgg['timing_defaults']['keepalivetimeout'],
+			$awgg['timing_defaults']['maxhandshakeattempts']));
 
 	$section->add($group);
 }

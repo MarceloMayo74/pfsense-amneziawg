@@ -325,6 +325,28 @@ $awgg = array(
 	'header_protection_min_padding'	=> 12,
 
 	/*
+	 * Los cinco tiempos que 3.0 vuelve configurables, con el valor que el backend
+	 * usa cuando el campo esta vacio. Salen de device/constants.go de
+	 * amneziawg-go y son los mismos del WireGuard de siempre.
+	 *
+	 * Hacen falta para validar, no para escribir: las reglas que atan un timing
+	 * con otro se rompen igual cuando uno esta puesto y el otro no, y ahi el
+	 * backend compara contra estas constantes. Sin ellas, un RejectAfterTime bajo
+	 * con los otros dos vacios pasaba la validacion y rompia el tunel.
+	 *
+	 * Ojo con el cero: UintRange.IsZero() es "el uint64 empaquetado vale 0", asi
+	 * que un 0 pelado --o un 0-0-- NO significa cero, significa "sin definir", y
+	 * el backend cae en la constante de aca abajo. Un rango 0-N si puede sortear
+	 * el cero, porque ahi el empaquetado no da 0.
+	 */
+	'timing_defaults'	=> array(
+		'rekeyaftertime'	=> 120,
+		'rekeytimeout'		=> 5,
+		'rejectaftertime'	=> 180,
+		'keepalivetimeout'	=> 10,
+		'maxhandshakeattempts'	=> 18),
+
+	/*
 	 * Valores de referencia, y nada mas que eso: se muestran como placeholder
 	 * del campo vacio para dar una idea del orden de magnitud.
 	 *

@@ -502,6 +502,118 @@ function awg_validate_obfuscation($pconfig) {
 		}
 	}
 
+	$input_errors = array_merge($input_errors, awg_validate_timings($pconfig));
+
+	return $input_errors;
+}
+
+/*
+ * Las relaciones entre los cinco tiempos de 3.0.
+ *
+ * Cada uno por separado ya paso por el 'range' de arriba. Lo que se mira aca es
+ * como quedan ENTRE ELLOS, que es donde el backend no valida nada y no da error:
+ * el setconf entra, el tunel levanta, y despues se comporta mal de una forma que
+ * no se parece a un problema de configuracion.
+ *
+ * Los cinco son locales -- cada punta lee los suyos y no viaja ninguno en el
+ * cable -- asi que estas reglas se resuelven de este lado y nada mas.
+ *
+ * Un campo vacio no se saltea: el backend cae en su constante y la relacion se
+ * rompe igual. Por eso entra timing_defaults.
+ */
+function awg_validate_timings($pconfig) {
+	global $awgg;
+
+	$input_errors = array();
+
+	// Abajo de 3.0 no se escribe ninguno, asi que el backend nunca los ve.
+	if (awg_tunnel_version($pconfig) < 3) {
+		return $input_errors;
+	}
+
+	$lo = $hi = array();
+
+	$defaults = (array) ($awgg['timing_defaults'] ?? array());
+
+	/*
+	 * Las dos reglas comparan contra el valor al que cae el backend, asi que sin
+	 * los defaults no hay nada contra que comparar. Se sale sin decir nada en vez
+	 * de tomar el cero que devuelve un indice ausente: ese cero rompe las dos
+	 * desigualdades a la vez y produce dos errores inventados sobre campos que el
+	 * usuario dejo vacios, que es peor que no validar.
+	 */
+	foreach (array('rekeyaftertime', 'rekeytimeout', 'rejectaftertime',
+		       'keepalivetimeout', 'maxhandshakeattempts') as $field) {
+		if (!isset($defaults[$field]) || !is_int($defaults[$field])) {
+			return $input_errors;
+		}
+	}
+
+	foreach ($defaults as $field => $default) {
+		$value = trim((string) ($pconfig[$field] ?? ''));
+
+		/*
+		 * Vacio, mal formado o "sin definir" es la constante del backend. Lo mal
+		 * formado ya lo reporto el bucle de arriba y no hay que decirlo dos
+		 * veces; aca solo importa contra que numero va a comparar el backend.
+		 */
+		if (($value === '') || !preg_match($awgg['range_mask'], $value)) {
+			$lo[$field] = $hi[$field] = $default;
+
+			continue;
+		}
+
+		[$l, $h] = awg_header_bounds($value);
+
+		if ($h < $l) {
+			return $input_errors;
+		}
+
+		// El 0 empaquetado es IsZero(), o sea "sin definir"
+		if (($l === 0) && ($h === 0)) {
+			$l = $h = $default;
+		}
+
+		$lo[$field] = $l;
+		$hi[$field] = $h;
+	}
+
+	/*
+	 * keyRefreshTimeoutReceiving() devuelve
+	 * max(0, RejectAfterTime.PickOne() - KeepaliveTimeout.Lo() - RekeyTimeout.Lo()).
+	 *
+	 * Cuando eso da cero, receive.go compara "time.Since(created) > 0" en CADA
+	 * paquete recibido y dispara un handshake nuevo por paquete. El tunel pasa
+	 * datos igual, asi que no parece roto: se ve como un uso de CPU que no cierra
+	 * y un peer que renegocia sin parar.
+	 *
+	 * Se compara contra el piso de RejectAfterTime porque PickOne() puede sortear
+	 * cualquier valor del rango, incluido el mas bajo.
+	 */
+	$floor = $lo['keepalivetimeout'] + $lo['rekeytimeout'];
+
+	if ($lo['rejectaftertime'] <= $floor) {
+		$input_errors[] = sprintf(
+			gettext('RejectAfterTime must be greater than KeepaliveTimeout + RekeyTimeout (%1$d + %2$d = %3$d), and its lowest value is %4$d. ' .
+				'Below that the backend re-handshakes on every packet it receives, which does not look like a configuration problem from the outside. ' .
+				'An empty field counts as the protocol default here, because that is the value the backend falls back to.'),
+			$lo['keepalivetimeout'], $lo['rekeytimeout'], $floor, $lo['rejectaftertime']);
+	}
+
+	/*
+	 * El emisor renueva la clave a los RekeyAfterTime.PickOne() y la deja de
+	 * poder usar a los RejectAfterTime.Hi() -- keychainExpireTime(), que usa el
+	 * techo y no sortea. Si el rekey puede caer despues del vencimiento, la clave
+	 * muere antes de renovarse y el trafico se corta hasta que cierre un
+	 * handshake nuevo, una vez por sesion y para siempre.
+	 */
+	if ($hi['rekeyaftertime'] >= $hi['rejectaftertime']) {
+		$input_errors[] = sprintf(
+			gettext('RekeyAfterTime must stay below RejectAfterTime: it can reach %1$d while the session expires at %2$d. ' .
+				'A key that expires before it is renewed stalls the tunnel once per session, until a fresh handshake completes.'),
+			$hi['rekeyaftertime'], $hi['rejectaftertime']);
+	}
+
 	return $input_errors;
 }
 
