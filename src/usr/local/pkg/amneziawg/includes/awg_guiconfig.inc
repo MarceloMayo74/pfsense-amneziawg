@@ -62,6 +62,37 @@ function awg_format_endpoint($header = true, $peer = null, $endpoint_key = 'endp
 	}
 }
 
+/*
+ * Los gateways del sistema, para el desplegable del peer.
+ *
+ * Se listan los de verdad y no las interfaces: lo que hace falta para armar la
+ * ruta es la direccion del gateway, y esa la resuelve gwlb.inc por nombre en el
+ * momento de usarla. Guardar el nombre y no la IP es a proposito, porque en una
+ * WAN por DHCP o PPPoE la IP cambia sola.
+ *
+ * Quedan afuera los grupos de gateway: un grupo es una politica de failover que
+ * se resuelve por conexion, y una ruta de host apunta a UNA direccion.
+ */
+function awg_gateway_list() {
+	$list = array('' => gettext('Default - let the routing table decide'));
+
+	foreach (return_gateways_array(true) as $name => $gateway) {
+		if (empty($gateway['gateway']) || !is_ipaddr($gateway['gateway'])) {
+			continue;
+		}
+
+		$descr = !empty($gateway['descr']) ? " - {$gateway['descr']}" : '';
+
+		$list[$name] = sprintf('%1$s (%2$s%3$s)%4$s',
+			$name,
+			$gateway['gateway'],
+			$descr,
+			isset($gateway['isdefaultgw']) ? gettext(' - default') : '');
+	}
+
+	return $list;
+}
+
 // Gets a list of available tunnels in a format suitable for input selection boxes
 function awg_get_tun_list() {
 	// Format tunnel description if one is configured

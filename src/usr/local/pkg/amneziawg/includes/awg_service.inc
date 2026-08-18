@@ -162,6 +162,14 @@ function awg_service_cli_stop($serialize = true) {
     // Disable any AmneziaWG gateways configured on the system.
     awg_gateways_set_enable(false);
 
+    /*
+     * Y sacar las rutas de host que pusimos para los endpoints. Con el servicio
+     * parado no hay tunel que las use, y dejarlas manda a un agujero todo el
+     * trafico a esas direcciones -- incluido el intento de levantar el tunel de
+     * nuevo si entretanto cambio el gateway.
+     */
+    awg_routes_flush();
+
     // Now we restart any additional services
     $ret_code |= awg_restart_extra_services();
 

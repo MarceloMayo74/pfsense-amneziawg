@@ -317,6 +317,9 @@ function awg_resolve_endpoints() {
 	awg_globals();
 	$dns_available = get_dnsavailable();
 
+	// Las rutas de host que este recorrido determina que tienen que existir
+	$routes = array();
+
 	// Do we have any peers?
 	foreach (config_get_path('installedpackages/amneziawg/peers/item', []) as $peer) {
 		/*
@@ -332,17 +335,265 @@ function awg_resolve_endpoints() {
 		if (!$dns_available && !is_ipaddr($peer['endpoint'])) {
 			continue;
 		}
-		// Strip port if empty
-		$peer['port'] = !empty($peer['port']) ? ":{$peer['port']}" : null;
 
-		$endpoint = "{$peer['endpoint']}{$peer['port']}";
+		$host = $peer['endpoint'];
+
+		/*
+		 * Con gateway elegido el nombre se resuelve UNA vez y la misma IP va a
+		 * los dos lados: a la ruta y a "awg set".
+		 *
+		 * Resolver dos veces es la trampa. Un nombre con varias A --lo normal en
+		 * un proveedor-- puede devolver una IP distinta en cada consulta, asi que
+		 * la ruta terminaria apuntando a un servidor y el tunel hablando con
+		 * otro. El tunel sale por el gateway de siempre y la ruta no sirve para
+		 * nada, sin que nada lo diga.
+		 *
+		 * Sin gateway no se toca nada: el endpoint sigue yendo como nombre y lo
+		 * resuelve awg(8), que es lo que se venia haciendo.
+		 */
+		if (!empty($peer['gateway'])) {
+			$ip = awg_resolve_host($host);
+
+			if ($ip !== '') {
+				$host = $ip;
+
+				$gw_ip = awg_gateway_address($peer['gateway'], $ip);
+
+				if ($gw_ip !== '') {
+					$routes[$ip] = $gw_ip;
+				}
+			}
+		}
+
+		// Strip port if empty
+		$port = !empty($peer['port']) ? ":{$peer['port']}" : null;
+
+		$endpoint = "{$host}{$port}";
 
 		awg_peer_set_endpoint($peer['tun'], $peer['publickey'], $endpoint);
 	}
 
+	awg_routes_reconcile($routes);
+
 	$last_update_time = new DateTime();
 
 	return $last_update_time;
+}
+
+/*
+ * Un nombre a su IP, o '' si no resuelve.
+ *
+ * gethostbyname() devuelve el nombre INTACTO cuando falla, que es la trampa
+ * clasica: sin este corte una resolucion fallida termina pasandole un nombre a
+ * "route add", que lo rechaza, o peor, resolviendolo por su cuenta a otra cosa.
+ */
+function awg_resolve_host($host) {
+	$host = trim((string) $host);
+
+	if ($host === '') {
+		return '';
+	}
+
+	if (is_ipaddr($host)) {
+		return $host;
+	}
+
+	$ip = gethostbyname($host);
+
+	return is_ipaddr($ip) ? $ip : '';
+}
+
+/*
+ * La IP actual del gateway elegido, de la familia que corresponda al destino.
+ *
+ * Se busca por nombre y en el momento, no se guarda: en una WAN por DHCP o
+ * PPPoE la direccion del gateway cambia sola, y una guardada al configurar el
+ * peer queda vieja sin aviso.
+ */
+function awg_gateway_address($name, $destination) {
+	$name = trim((string) $name);
+
+	if ($name === '') {
+		return '';
+	}
+
+	$ip = lookup_gateway_ip_by_name($name);
+
+	if (!is_ipaddr($ip)) {
+		return '';
+	}
+
+	// Una ruta v4 no se alcanza por un gateway v6 ni al reves
+	if (is_ipaddrv6($destination) !== is_ipaddrv6($ip)) {
+		return '';
+	}
+
+	return $ip;
+}
+
+/*
+ * Deja la tabla de rutas con exactamente las rutas de host que pide $routes, un
+ * mapa de IP de destino a IP de gateway.
+ *
+ * Se reconcilia contra un registro propio y no contra la tabla del sistema. Una
+ * ruta no lleva ninguna marca de quien la puso, asi que mirando la tabla no hay
+ * forma de distinguir la nuestra de una que escribio el operador en
+ * System > Routing, y borrar esa ultima seria bastante peor que dejar una
+ * nuestra colgada.
+ *
+ * Lo que NO se hace es tocar una ruta que no pusimos: si el destino ya tiene
+ * ruta de otro lado, se respeta y se avisa en el log. Ganarle a mano al
+ * operador dejaria un paquete de VPN decidiendo el ruteo del firewall entero.
+ */
+function awg_routes_reconcile($routes) {
+	global $awgg;
+
+	$previous = awg_routes_state_read();
+
+	$written = array();
+
+	// Lo que sobra: estaba y ya no se pide
+	foreach ($previous as $dst => $gw) {
+		if (!isset($routes[$dst])) {
+			awg_route_delete($dst);
+		}
+	}
+
+	foreach ($routes as $dst => $gw) {
+		$had = $previous[$dst] ?? null;
+
+		if ($had === $gw) {
+			// Ya esta puesta y apunta a donde tiene que apuntar
+			$written[$dst] = $gw;
+
+			continue;
+		}
+
+		if (is_null($had) && awg_route_exists($dst)) {
+			log_error(sprintf(
+				gettext('AmneziaWG: %1$s already has a host route that this package did not create; leaving it alone and not routing that endpoint through %2$s.'),
+				$dst, $gw));
+
+			continue;
+		}
+
+		if (awg_route_set($dst, $gw, !is_null($had))) {
+			$written[$dst] = $gw;
+		}
+	}
+
+	awg_routes_state_write($written);
+}
+
+// El registro de lo que pusimos. Ilegible o ausente se trata como vacio.
+function awg_routes_state_read() {
+	global $awgg;
+
+	$raw = @file_get_contents($awgg['route_state']);
+
+	if ($raw === false) {
+		return array();
+	}
+
+	$decoded = json_decode($raw, true);
+
+	return is_array($decoded) ? $decoded : array();
+}
+
+function awg_routes_state_write($routes) {
+	global $awgg;
+
+	if (empty($routes)) {
+		@unlink($awgg['route_state']);
+
+		return true;
+	}
+
+	safe_mkdir($awgg['run_path']);
+
+	return (@file_put_contents($awgg['route_state'], json_encode($routes)) !== false);
+}
+
+// Hay ya una ruta de host para este destino, la haya puesto quien la haya puesto
+function awg_route_exists($dst) {
+	$family = is_ipaddrv6($dst) ? '-inet6' : '-inet';
+
+	$output = $rc = null;
+
+	exec('/sbin/route -n get ' . $family . ' ' . escapeshellarg($dst) . ' 2>/dev/null', $output, $rc);
+
+	if ($rc !== 0) {
+		return false;
+	}
+
+	/*
+	 * "route get" contesta igual con la ruta por defecto, asi que un exit 0 no
+	 * alcanza: lo que distingue a una ruta de host es la bandera de host en la
+	 * respuesta. Sin esto, en un firewall con default gateway --o sea siempre--
+	 * cada destino parece tener ya su ruta y no se agrega ninguna.
+	 */
+	foreach ($output as $line) {
+		if (preg_match('/^\s*flags:.*\bHOST\b/i', $line)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function awg_route_set($dst, $gw, $replace = false) {
+	$family = is_ipaddrv6($dst) ? '-inet6' : '-inet';
+
+	$action = $replace ? 'change' : 'add';
+
+	$cmd = '/sbin/route -q ' . $action . ' ' . $family . ' -host ' .
+	       escapeshellarg($dst) . ' ' . escapeshellarg($gw);
+
+	$output = $rc = null;
+
+	exec($cmd . ' 2>&1', $output, $rc);
+
+	/*
+	 * Un 'change' sobre una ruta que ya no esta falla, y pasa de verdad: la ruta
+	 * se va sola cuando cae la interfaz de su gateway. Se reintenta como 'add'
+	 * en vez de darlo por perdido hasta el proximo ciclo.
+	 */
+	if (($rc !== 0) && $replace) {
+		return awg_route_set($dst, $gw, false);
+	}
+
+	if ($rc !== 0) {
+		log_error(sprintf(
+			gettext('AmneziaWG: could not route %1$s through %2$s: %3$s'),
+			$dst, $gw, implode(' ', (array) $output)));
+
+		return false;
+	}
+
+	return true;
+}
+
+function awg_route_delete($dst) {
+	$family = is_ipaddrv6($dst) ? '-inet6' : '-inet';
+
+	$output = $rc = null;
+
+	exec('/sbin/route -q delete ' . $family . ' -host ' . escapeshellarg($dst) . ' 2>&1',
+	     $output, $rc);
+
+	return ($rc === 0);
+}
+
+/*
+ * Saca todas las rutas del paquete. Va en el camino de parada del servicio: un
+ * AmneziaWG apagado no tiene por que seguir desviando trafico a esos destinos.
+ */
+function awg_routes_flush() {
+	foreach (awg_routes_state_read() as $dst => $gw) {
+		awg_route_delete($dst);
+	}
+
+	awg_routes_state_write(array());
 }
 
 /*
@@ -458,6 +709,7 @@ function awg_do_peer_post($post) {
 	$pconfig['descr'] 		= $post['descr'];
 	$pconfig['endpoint'] 		= $post['endpoint'];
 	$pconfig['port'] 		= empty($post['port']) ? $awgg['default_port'] : $post['port'];
+	$pconfig['gateway']		= $post['gateway'] ?? '';
 	$pconfig['persistentkeepalive']	= $post['persistentkeepalive'];
 	$pconfig['publickey'] 		= $post['publickey'];
 	$pconfig['presharedkey']	= $post['presharedkey'];
@@ -465,7 +717,8 @@ function awg_do_peer_post($post) {
 
 	// Looks like we have a dynamic endpoint, so clear endpoint or port variables before saving
 	if (isset($post['dynamic']) && $post['dynamic'] == 'yes') {
-		unset($pconfig['endpoint'], $pconfig['port']);
+		// El gateway se va con ellos: sin endpoint no hay ruta que armar
+		unset($pconfig['endpoint'], $pconfig['port'], $pconfig['gateway']);
 	}
 
 	$input_errors = awg_validate_peer_post($pconfig, $peer_idx);

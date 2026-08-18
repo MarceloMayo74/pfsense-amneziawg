@@ -1222,6 +1222,7 @@ function awg_client_do_peer_post($post) {
 	$pconfig['client_allowedips']	= trim((string) ($post['client_allowedips'] ?? ''));
 	$pconfig['endpoint']		= trim((string) ($post['endpoint'] ?? ''));
 	$pconfig['port']		= trim((string) ($post['port'] ?? ''));
+	$pconfig['gateway']		= trim((string) ($post['gateway'] ?? ''));
 	$pconfig['persistentkeepalive']	= trim((string) ($post['persistentkeepalive'] ?? ''));
 
 	$genera = ($pconfig['client_enable'] == 'yes');
@@ -1374,6 +1375,18 @@ function awg_client_do_peer_post($post) {
 		$input_errors[] = sprintf(gettext('Invalid endpoint port (%s).'), $pconfig['port']);
 	}
 
+	/*
+	 * El gateway tiene que ser uno de los del sistema. Uno que no existe se
+	 * guardaria sin chistar y despues no habria ruta ni error: lookup_gateway_
+	 * ip_by_name() no encuentra nada y awg_resolve_endpoints() sigue de largo.
+	 */
+	if ((strlen($pconfig['gateway']) > 0)
+	    && !array_key_exists($pconfig['gateway'], awg_gateway_list())) {
+		$input_errors[] = sprintf(
+			gettext('Gateway %s is not one this firewall has. Pick another, or leave it on the default.'),
+			$pconfig['gateway']);
+	}
+
 	if (!empty($pconfig['persistentkeepalive'])) {
 		if (!is_numericint($pconfig['persistentkeepalive'])) {
 			$input_errors[] = sprintf(gettext('Invalid keep alive interval (%s).'),
@@ -1429,6 +1442,13 @@ function awg_client_do_peer_post($post) {
 		'dynamic'		=> $manual_endpoint ? 'no' : 'yes',
 		'endpoint'		=> $manual_endpoint ? $pconfig['endpoint'] : '',
 		'port'			=> $manual_endpoint ? $pconfig['port'] : '',
+
+		/*
+		 * Sin endpoint no hay ruta que armar, asi que el gateway se descarta
+		 * junto con el. Guardarlo igual dejaria un peer que dice salir por una
+		 * WAN y no disca a ningun lado.
+		 */
+		'gateway'		=> $manual_endpoint ? $pconfig['gateway'] : '',
 		'persistentkeepalive'	=> $genera ? null : $pconfig['persistentkeepalive'],
 		'publickey'		=> $pconfig['publickey'],
 		'presharedkey'		=> empty($pconfig['presharedkey']) ? null : $pconfig['presharedkey']);

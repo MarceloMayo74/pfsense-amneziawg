@@ -223,6 +223,9 @@ if (!$_POST || ($act == 'email')) {
 		$pconfig['client_allowedips']	= $store['allowedips'] ?? '';
 		$pconfig['endpoint']		= $store['endpoint'] ?? $peer['endpoint'];
 		$pconfig['port']		= $store['port'] ?? $peer['port'];
+
+		// Del peer y nunca del store: es ruteo de este firewall, no del cliente
+		$pconfig['gateway']		= $peer['gateway'] ?? '';
 		$pconfig['persistentkeepalive']	= $store['persistentkeepalive'] ?? $peer['persistentkeepalive'];
 	} else {
 		/*
@@ -252,6 +255,7 @@ if (!$_POST || ($act == 'email')) {
 		$pconfig['client_allowedips']	= $defaults['client_allowedips'];
 		$pconfig['endpoint']		= (string) $defaults['endpoint'];
 		$pconfig['port']		= (string) $defaults['port'];
+		$pconfig['gateway']		= '';
 		$pconfig['persistentkeepalive']	= (string) $defaults['persistentkeepalive'];
 	}
 
@@ -421,6 +425,31 @@ $port_help = array(
 			    'the backend rejects an endpoint without one.'));
 
 $section->add($group);
+
+/*
+ * Por que gateway sale el trafico HACIA este peer.
+ *
+ * Solo tiene sentido discando: sin endpoint no hay a donde ir, y generando un
+ * cliente el peer es roadwarrior por definicion. De ahi el 'manualonly', que es
+ * el inverso de 'clientonly'.
+ *
+ * Lo que hace por debajo es una ruta de host al endpoint, no un binding del
+ * socket: FreeBSD no tiene SO_BINDTODEVICE, y forzar solo la direccion de
+ * origen deja el paquete saliendo igual por donde diga la ruta -- con el origen
+ * de una WAN y la salida por otra, que es lo que un ISP descarta.
+ */
+$section->addInput(new Form_Select(
+	'gateway',
+	'Gateway',
+	$pconfig['gateway'],
+	awg_gateway_list()
+))->addClass('manualonly')
+  ->setHelp('Which WAN this firewall uses to reach the peer, when the routing table would otherwise pick another one. ' .
+	    'Only applies while an endpoint is set above.<br />' .
+	    '<span class="text-danger">Note: </span>this installs a host route to the endpoint address, so <b>all</b> traffic to that ' .
+	    'address takes the chosen gateway, not only the tunnel. The route is removed when the peer, its gateway or the ' .
+	    'AmneziaWG service goes away, and an address that already has a host route from elsewhere is left alone. ' .
+	    '(<a href="/system_gateways.php">' . gettext('Gateways') . '</a>)');
 
 $section->addInput(new Form_Input(
 	'persistentkeepalive',
@@ -984,6 +1013,9 @@ events.push(function() {
 		var mode = generating ? 'client' : 'manual';
 
 		hideClass('clientonly', !generating);
+
+		// El inverso: lo que solo sirve cuando este firewall es el que disca
+		hideClass('manualonly', generating);
 
 		$('#publickey').prop('readonly', generating);
 

@@ -73,6 +73,11 @@ function awg_gen_publickey($privkey) {
 }
 
 function awg_get_tun_list() { return array('unassigned' => '', 'tun9000' => 'tun9000'); }
+
+// Los dos gateways del firewall de prueba: uno por defecto y uno que no lo es
+function awg_gateway_list() {
+	return array('' => 'Default', 'WAN_DHCP' => 'WAN_DHCP', 'WAN2_PPPOE' => 'WAN2_PPPOE');
+}
 function awg_tunnel_get_peers_config($tun) { return array(); }
 function awg_peer_get_array_idx($pubkey, $tun) { return 0; }
 
@@ -234,6 +239,52 @@ check('el endpoint va al archivo del cliente',
       ($GLOBALS['store_visto']['endpoint'] ?? null) === 'mifirewall.dyndns.org');
 check('y el keepalive tambien',
       ($GLOBALS['store_visto']['persistentkeepalive'] ?? null) === '25');
+
+echo "\n=== el gateway, que solo existe discando ===\n";
+
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> 'vpn.proveedor.com',
+	'port'		=> '51820',
+	'gateway'	=> 'WAN2_PPPOE')));
+
+check('se guarda sin errores', empty($res['input_errors']), implode(' | ', $res['input_errors']));
+check('el gateway llega al peer',
+      ($GLOBALS['peer_post_visto']['gateway'] ?? null) === 'WAN2_PPPOE',
+      var_export($GLOBALS['peer_post_visto']['gateway'] ?? null, true));
+
+// Sin endpoint no hay ruta que armar, asi que el gateway se va con el
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> '',
+	'port'		=> '',
+	'gateway'	=> 'WAN2_PPPOE')));
+
+check('sin endpoint el gateway se descarta', ($GLOBALS['peer_post_visto']['gateway'] ?? null) === '');
+check('y no da error', empty($res['input_errors']), implode(' | ', $res['input_errors']));
+
+// Generando cliente el peer es roadwarrior: no disca, no hay gateway
+$res = correr(post_base(array(
+	'client_enable'		=> 'yes',
+	'privatekey'		=> $clave_priv,
+	'endpoint'		=> 'mifirewall.dyndns.org',
+	'port'			=> '51820',
+	'client_allowedips'	=> '0.0.0.0/0',
+	'gateway'		=> 'WAN2_PPPOE')));
+
+check('generando cliente tampoco se guarda gateway',
+      ($GLOBALS['peer_post_visto']['gateway'] ?? null) === '',
+      var_export($GLOBALS['peer_post_visto']['gateway'] ?? null, true));
+
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> 'vpn.proveedor.com',
+	'port'		=> '51820',
+	'gateway'	=> 'WAN9_QUE_NO_EXISTE')));
+
+check('un gateway que no existe se rechaza', !empty($res['input_errors']));
+check('y el error lo nombra', (bool) preg_grep('/WAN9_QUE_NO_EXISTE/', $res['input_errors']),
+      implode(' | ', $res['input_errors']));
 
 echo "\n=== lo que se niega a guardar ===\n";
 

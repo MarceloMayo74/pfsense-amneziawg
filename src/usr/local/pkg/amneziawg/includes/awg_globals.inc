@@ -432,6 +432,15 @@ $awgg['awg_daemon'] 		= "{$awgg['php_awg']} -f {$awgg['awg_includes']}/awg_servi
  */
 $awgg['watchdog_cmd']		= "{$awgg['awg_daemon']} watchdog";
 $awgg['watchdog_pattern']	= "{$awgg['awg_includes']}/awg_service.inc watchdog";
+/*
+ * Las rutas de host que el paquete puso, para poder sacarlas despues.
+ *
+ * Hace falta un registro propio porque una ruta en FreeBSD no se puede marcar:
+ * mirando la tabla no hay forma de saber cual la puso este paquete y cual el
+ * operador, y borrar una ajena seria peor que dejar la nuestra colgada.
+ */
+$awgg['route_state']		= "{$awgg['run_path']}/routes.json";
+
 $awgg['watchdog_state']		= "{$awgg['run_path']}/watchdog.state";
 $awgg['watchdog_lock']		= "{$awgg['run_path']}/watchdog.lock";
 
