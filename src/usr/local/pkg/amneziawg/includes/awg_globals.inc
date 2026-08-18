@@ -325,6 +325,35 @@ $awgg = array(
 	'header_protection_min_padding'	=> 12,
 
 	/*
+	 * Lo que un paquete de datos lleva ademas del payload, para poder decir hasta
+	 * donde llega S4 sin fragmentar.
+	 *
+	 * S4 es el unico relleno que se paga en CADA paquete de datos, asi que su
+	 * limite real no es un numero del protocolo sino el MTU:
+	 *
+	 *   en el cable = MTU + S4 + 32 + (28 en IPv4 | 48 en IPv6)
+	 *                        \____/   \_____________________/
+	 *                     WG: header    IP + UDP de afuera
+	 *                     16 + tag 16
+	 *
+	 * Con el MTU de fabrica de 1420 y un camino de 1500, eso deja S4 <= 20 sobre
+	 * IPv4 y <= 0 sobre IPv6 -- 1420 esta elegido para que un paquete lleno entre
+	 * justo en 1500 sobre IPv6, sin margen para nada mas.
+	 *
+	 * Ojo: 'max' => 1280 en obfuscation_fields NO es un tope del protocolo. Sale
+	 * del modelo de datos del plugin de OPNsense, que es de donde salieron los
+	 * rangos de 1.x y 2.0. En amneziawg-tools transport_packet_junk_size es un
+	 * uint16_t leido con parse_uint16 (containers.h) y en amneziawg-go es un
+	 * uint32 sin cota, asi que los dos aceptan hasta 65535. Hay generadores por
+	 * ahi que afirman un tope de 32 citando config.c; ese numero no esta en
+	 * config.c ni en ningun otro lado de las fuentes.
+	 */
+	'transport_overhead'	=> 32,
+	'outer_overhead_v4'	=> 28,
+	'outer_overhead_v6'	=> 48,
+	'path_mtu_assumed'	=> 1500,
+
+	/*
 	 * Los cinco tiempos que 3.0 vuelve configurables, con el valor que el backend
 	 * usa cuando el campo esta vacio. Salen de device/constants.go de
 	 * amneziawg-go y son los mismos del WireGuard de siempre.

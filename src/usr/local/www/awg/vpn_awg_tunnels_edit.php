@@ -601,9 +601,29 @@ if ($awg2) {
 
 $section->add($group);
 
+/*
+ * El texto de abajo de los cuatro rellenos. S1-S3 son del handshake y son
+ * gratis; S4 no, y el unico limite que tiene de verdad es el MTU -- ni el
+ * backend ni las tools lo acotan. Se da la cuenta hecha con el MTU real de esta
+ * interfaz para que no haya que sacarla a mano.
+ */
+$s4_room = awg_s4_headroom($pconfig['mtu']);
+
+$s4_note = ($s4_room['v4'] >= 0)
+	? sprintf(gettext('with this tunnel\'s MTU of %1$d that leaves room for about %2$d bytes of S4 over IPv4, and %3$d over IPv6'),
+		  (int) $pconfig['mtu'], $s4_room['v4'], $s4_room['v6'])
+	: sprintf(gettext('this tunnel\'s MTU of %1$d already fills a %2$d-byte path on its own, so any S4 at all fragments'),
+		  (int) $pconfig['mtu'], $awgg['path_mtu_assumed']);
+
 $section->addInput(new Form_StaticText(
 	'',
-	"<span class='text-muted'>{$s(gettext('Bytes of padding added to each handshake packet, 0 to 1280.'))}</span>"
+	"<span class='text-muted'>" .
+	$s(gettext('Bytes of padding added to each packet, 0 to 1280. S1, S2 and S3 are handshake only, so they cost nothing once the tunnel is up.')) .
+	'<br />' .
+	$s(sprintf(gettext('<b>S4 is different</b>: it is paid on every data packet, so it comes straight out of the MTU — on the wire a packet measures MTU + S4 + %1$d, plus %2$d for IPv4 or %3$d for IPv6. So %4$s. Header protection needs S4 to reach %5$d, which is why turning it on is an MTU decision.'),
+		     $awgg['transport_overhead'], $awgg['outer_overhead_v4'], $awgg['outer_overhead_v6'],
+		     $s4_note, $awgg['header_protection_min_padding'])) .
+	'</span>'
 ));
 
 /*

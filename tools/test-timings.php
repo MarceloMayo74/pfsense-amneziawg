@@ -70,6 +70,32 @@ eval(extract_function("{$src}/awg_api.inc", 'awg_header_bounds'));
 eval(extract_function("{$src}/awg_api.inc", 'awg_tunnel_version'));
 eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_timings'));
 
+/*
+ * awg_s4_headroom() vive en awg_api.inc y usa otras cuatro constantes del
+ * globals. Se traen aparte para no ensuciar el $awgg de los timings.
+ */
+preg_match("/'transport_overhead'\s*=>\s*(\d+)/", $globals, $to);
+preg_match("/'outer_overhead_v4'\s*=>\s*(\d+)/", $globals, $o4);
+preg_match("/'outer_overhead_v6'\s*=>\s*(\d+)/", $globals, $o6);
+preg_match("/'path_mtu_assumed'\s*=>\s*(\d+)/", $globals, $pm);
+preg_match("/'default_mtu'\s*=>\s*(\d+)/", $globals, $dm);
+preg_match("/'header_protection_min_padding'\s*=>\s*(\d+)/", $globals, $hp);
+
+if (empty($to) || empty($o4) || empty($o6) || empty($pm) || empty($dm) || empty($hp)) {
+	fwrite(STDERR, "Faltan las constantes de overhead en awg_globals.inc\n");
+	exit(2);
+}
+
+$awgg['header_protection_min_padding'] = (int) $hp[1];
+
+$awgg['transport_overhead']	= (int) $to[1];
+$awgg['outer_overhead_v4']	= (int) $o4[1];
+$awgg['outer_overhead_v6']	= (int) $o6[1];
+$awgg['path_mtu_assumed']	= (int) $pm[1];
+$awgg['default_mtu']		= (int) $dm[1];
+
+eval(extract_function("{$src}/awg_api.inc", 'awg_s4_headroom'));
+
 $pass = $fail = 0;
 
 function check($what, $cond, $detail = '') {
@@ -250,6 +276,41 @@ check('con un default que no es un numero tampoco', empty(errores(array('rejecta
 
 $awgg['timing_defaults'] = $completos;
 check('y con los defaults de vuelta vuelve a validar', !empty(errores(array('rejectaftertime' => '1'))));
+
+echo "\n=== cuanto S4 entra sin fragmentar ===\n";
+
+/*
+ * S4 se paga en cada paquete de datos, asi que su limite real es el MTU y no un
+ * numero del protocolo: en el cable un paquete mide MTU + S4 + 32, mas 28 de
+ * IPv4 o 48 de IPv6.
+ */
+$m = awg_s4_headroom(1420);
+
+check('con el MTU de fabrica quedan 20 bytes sobre IPv4', $m['v4'] === 20, var_export($m, true));
+check('y ninguno sobre IPv6: 1420 llena los 1500 justo', $m['v6'] === 0, var_export($m, true));
+
+$m = awg_s4_headroom(1400);
+check('bajando el MTU a 1400 entran 40 sobre IPv4', $m['v4'] === 40);
+check('y 20 sobre IPv6', $m['v6'] === 20);
+
+$m = awg_s4_headroom(1460);
+check('con 1460 ya no entra ni S4 en cero sobre IPv4', $m['v4'] < 0, var_export($m, true));
+
+/*
+ * El piso de la proteccion de headers contra el MTU: 12 bytes de S4 necesitan
+ * un MTU de 1428 o menos sobre IPv4, y de 1408 o menos sobre IPv6.
+ */
+$min = $awgg['header_protection_min_padding'];
+
+check('la proteccion de headers entra sobre IPv4 con el MTU de fabrica',
+      awg_s4_headroom(1420)['v4'] >= $min);
+check('pero NO sobre IPv6 con el MTU de fabrica',
+      awg_s4_headroom(1420)['v6'] < $min);
+check('sobre IPv6 hace falta bajar a 1408', awg_s4_headroom(1408)['v6'] >= $min,
+      var_export(awg_s4_headroom(1408), true));
+
+check('un MTU invalido cae en el de fabrica y no rompe',
+      awg_s4_headroom(0) === awg_s4_headroom($awgg['default_mtu']));
 
 printf("\n%d pasaron, %d fallaron\n", $pass, $fail);
 

@@ -1149,6 +1149,34 @@ function awg_gen_junk_payload() {
 }
 
 /*
+ * Hasta cuanto puede llegar S4 con este MTU sin que el paquete se fragmente.
+ *
+ * Devuelve array('v4' => n, 'v6' => n), que pueden dar negativos: eso significa
+ * que el MTU ya no deja lugar ni para S4 en cero, y es el caso normal en IPv6
+ * con el MTU de fabrica. El que llama decide que hacer con eso; aca no se
+ * redondea a cero para no esconder cuanto falta.
+ *
+ * No es una regla que el backend valide -- acepta cualquier S4 y fragmenta o
+ * pierde el paquete despues -- asi que esto informa, no rechaza. El camino no
+ * siempre mide 1500 y hay redes donde un S4 mas alto anda perfecto.
+ */
+function awg_s4_headroom($mtu) {
+	global $awgg;
+
+	$mtu = (int) $mtu;
+
+	if ($mtu <= 0) {
+		$mtu = $awgg['default_mtu'];
+	}
+
+	$room = $awgg['path_mtu_assumed'] - $mtu - $awgg['transport_overhead'];
+
+	return array(
+		'v4' => $room - $awgg['outer_overhead_v4'],
+		'v6' => $room - $awgg['outer_overhead_v6']);
+}
+
+/*
  * Los limites de un header, que puede ser un valor suelto o un rango 'lo-hi'.
  * Un valor suelto es el rango degenerado [n, n], que es como lo modela
  * UintRange en el backend.
