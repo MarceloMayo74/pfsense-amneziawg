@@ -57,6 +57,13 @@ define('AWG_ERROR_SVC_START',		4);
 define('AWG_ERROR_SVC_STOP',		8);
 define('AWG_ERROR_SVC_CREATE',		16);
 
+/*
+ * Aplicar con el servicio parado no aplica nada. Antes eso era exito silencioso:
+ * awg_tunnel_sync() devolvia 0, las pantallas limpiaban el cartel de cambios
+ * pendientes, y el operador se quedaba creyendo que aplico.
+ */
+define('AWG_ERROR_SVC_NOT_RUNNING',	32);
+
 $awgg = array(
 	/*
 	 * Binarios propios del paquete. Se empaquetan con el .pkg en lugar de
@@ -140,10 +147,56 @@ $awgg = array(
 						AWG_ERROR_SVC_RUNNING	=> gettext('AmneziaWG service is already running'),
 						AWG_ERROR_SVC_START	=> gettext('Unable to start AmneziaWG service'),
 						AWG_ERROR_SVC_STOP	=> gettext('Unable to stop AmneziaWG service'),
-						AWG_ERROR_SVC_CREATE	=> gettext('Unable to create AmneziaWG tunnel(s)'))),
+						AWG_ERROR_SVC_CREATE	=> gettext('Unable to create AmneziaWG tunnel(s)'),
+						AWG_ERROR_SVC_NOT_RUNNING => gettext('Nothing was applied: the AmneziaWG service is not running. Start it and apply again.'))),
+	/*
+	 * Las versiones de pfSense sobre las que este paquete esta probado.
+	 *
+	 * Se comparan como PREFIJO contra $g['product_version'], asi que '2.9.'
+	 * cubre 2.9.0-BETA, 2.9.0 y sus parches sin tener que enumerarlos.
+	 *
+	 * Por que hace falta esto, si el .pkg ya declara su ABI: porque el ABI NO
+	 * alcanza. FreeBSD:16:amd64 no es solo 2.9.0 -- tambien son pfSense Plus
+	 * 25.11, 25.11.1, 26.03, 26.03.1, 26.07 y 26.10, que corren el mismo
+	 * FreeBSD 16. En todas ellas 'pkg add' acepta este paquete sin una sola
+	 * advertencia. El README decia que el ABI lo frenaba en otro lado; eso vale
+	 * para FreeBSD 15 y anteriores y es falso para toda la linea 16 de Plus.
+	 *
+	 * Sin esta lista, el paquete se cablea al arranque --earlyshellcmd, grupo
+	 * de interfaces, ACL de Unbound, cron-- de un firewall que nadie probo, y
+	 * el primer sintoma llega despues, lejos, y sin nada que lo explique.
+	 *
+	 * Agregar una version aca es decir "la probe". No se agrega por parecido.
+	 */
+	'supported_versions'			=> array('2.9.'),
+
+	/*
+	 * La salida de emergencia. Un archivo que hay que crear a mano desde la
+	 * shell: el que llega ahi sabe lo que hace, y nadie llega por accidente.
+	 */
+	'force_install_flag'			=> '/root/.amneziawg-force-install',
+
 	'default_mtu'				=> 1420,
 	'default_port'				=> 51820,
 	'default_resolve_interval'		=> 300,
+
+	/*
+	 * Rotacion del puerto de destino ("port hopping").
+	 *
+	 * El intervalo NO es el de resolucion de DNS aunque los dos vivan en el mismo
+	 * loop: saltar cada 10 segundos con el default de 300 obligaria a consultar
+	 * DNS 30 veces mas seguido, que es gratis para nadie y lo primero que limita
+	 * un resolver. Van separados a proposito.
+	 *
+	 * El minimo de 2 esta medido, no elegido: por debajo no se probo. A 2 y a 10
+	 * segundos el tunel cruza sin perder un paquete, porque el puerto de ORIGEN
+	 * no cambia y por lo tanto el otro extremo nunca ve un peer nuevo -- no hay
+	 * roaming que deshaga la rotacion.
+	 */
+	'default_porthop_interval'		=> 10,
+	'porthop_interval_min'			=> 2,
+	'porthop_interval_max'			=> 300,
+	'porthop_range_min_ports'		=> 2,
 
 	/*
 	 * Los datos del cliente viven en un sub-elemento del peer y no sueltos entre

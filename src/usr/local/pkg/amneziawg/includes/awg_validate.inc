@@ -634,6 +634,73 @@ function awg_validate_timings($pconfig) {
 }
 
 /*
+ * Valida el rango y el intervalo de la rotacion de puertos.
+ *
+ * Lo que se rechaza no es solo lo mal escrito: un rango de un solo puerto pasa
+ * cualquier chequeo de sintaxis y no rota nada, y un peer sin endpoint no tiene
+ * a donde saltar. Los dos se aceptarian en silencio y no harian nada, que es
+ * peor que un error.
+ */
+function awg_validate_porthop($pconfig) {
+	global $awgg;
+
+	$input_errors = array();
+
+	$range = trim($pconfig['porthop'] ?? '');
+
+	$interval = trim($pconfig['porthop_interval'] ?? '');
+
+	if (empty($range)) {
+		// Sin rango no hay rotacion, y entonces el intervalo no significa nada
+		return $input_errors;
+	}
+
+	if (empty(trim($pconfig['endpoint'] ?? ''))) {
+		$input_errors[] = gettext('Port hopping needs an endpoint: it rotates the port this firewall dials out to. ' .
+					  'A peer that dials in here has its address learned from the handshake instead.');
+
+		return $input_errors;
+	}
+
+	if (!preg_match('/^(\d{1,5})\s*-\s*(\d{1,5})$/', $range, $m)) {
+		$input_errors[] = "Invalid port hopping range ({$range}). It must be written as low-high, for example 20000-20100.";
+
+		return $input_errors;
+	}
+
+	[$lo, $hi] = array((int) $m[1], (int) $m[2]);
+
+	if (!is_port((string) $lo) || !is_port((string) $hi)) {
+		$input_errors[] = "Port hopping range ({$range}) is outside 1-65535.";
+
+		return $input_errors;
+	}
+
+	if ($lo >= $hi) {
+		$input_errors[] = "Port hopping range ({$range}) must go from the lower port to the higher one.";
+
+		return $input_errors;
+	}
+
+	if ((($hi - $lo) + 1) < $awgg['porthop_range_min_ports']) {
+		$input_errors[] = "Port hopping range ({$range}) must contain at least {$awgg['porthop_range_min_ports']} ports; " .
+				  "a single port never changes the flow.";
+	}
+
+	if (!empty($interval)) {
+		if (!is_numericint($interval)) {
+			$input_errors[] = "Invalid port hopping interval ({$interval}).";
+		} elseif (((int) $interval < $awgg['porthop_interval_min']) ||
+			  ((int) $interval > $awgg['porthop_interval_max'])) {
+			$input_errors[] = "Port hopping interval must be between {$awgg['porthop_interval_min']} and " .
+					  "{$awgg['porthop_interval_max']} seconds ({$interval}).";
+		}
+	}
+
+	return $input_errors;
+}
+
+/*
  * Valildate a peer
  * These validation checks should be in the same order as the UI for consistency
  */
@@ -653,6 +720,9 @@ function awg_validate_peer_post($pconfig, $posted_peer_idx) {
 	if (!empty($rport) && (!ctype_digit($rport) || !is_port($rport))) {
 		$input_errors[] = "Invalid peer remote port ({$rport}).";
 	}
+
+	// Check the port hopping range and interval
+	$input_errors = array_merge($input_errors, awg_validate_porthop($pconfig));
 
 	// Check persistent keep alive
 	$keepalive = $pconfig['persistentkeepalive'];

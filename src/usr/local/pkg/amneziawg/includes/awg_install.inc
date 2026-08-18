@@ -36,7 +36,38 @@ require_once('amneziawg/includes/awg_service.inc');
  * This is the main install hook
  */
 function awg_install() {
-	global $g;
+	global $g, $awgg;
+
+	awg_globals();
+
+	/*
+	 * La guarda de plataforma, y va PRIMERO por una razon concreta.
+	 *
+	 * Todo lo que sigue escribe en config.xml y se cablea al arranque del
+	 * firewall: earlyshellcmd, grupo de interfaces, ACL de Unbound, cron del
+	 * watchdog. En una version que nadie probo eso queda corriendo para
+	 * siempre, y el sintoma --si llega-- llega despues y lejos.
+	 *
+	 * pkg(8) no lo frena: el ABI FreeBSD:16:amd64 tambien lo cumplen pfSense
+	 * Plus 25.11, 25.11.1, 26.03, 26.03.1, 26.07 y 26.10, que corren el mismo
+	 * FreeBSD 16. Si la guarda no esta aca, no esta en ningun lado.
+	 *
+	 * Los archivos ya quedaron extraidos en disco --un POST-INSTALL no puede
+	 * deshacer eso-- pero inertes: sin este hook el paquete no arranca nada ni
+	 * toca la configuracion. Se saca con 'pkg delete' y no deja rastro.
+	 */
+	if (!awg_platform_supported() && !awg_platform_forced()) {
+		update_status("\n" . awg_platform_refusal_text());
+
+		return;
+	}
+
+	if (!awg_platform_supported()) {
+		$p = awg_platform();
+
+		update_status("\n  WARNING: {$p['label']} {$p['version']} is not a tested version. " .
+			      "Installing because {$awgg['force_install_flag']} exists.\n");
+	}
 
 	$g['amneziawg_installing'] = true;
 

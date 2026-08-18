@@ -626,6 +626,178 @@ function awg_routes_flush() {
  * 
  * An interval of 0 will effectively disable re-resolving
  */
+/*
+ * El rango de puertos sobre el que rota un peer, o null si no rota.
+ *
+ * Se guarda como texto "20000-20100" porque es como lo escribe el usuario y
+ * como lo lee despues; partirlo en dos campos no agrega nada y da dos lugares
+ * donde uno puede quedar sin el otro.
+ */
+function awg_porthop_range($peer) {
+	if (empty($peer['porthop'])) {
+		return null;
+	}
+
+	if (!preg_match('/^(\d{1,5})\s*-\s*(\d{1,5})$/', trim($peer['porthop']), $m)) {
+		return null;
+	}
+
+	[$lo, $hi] = array((int) $m[1], (int) $m[2]);
+
+	if (($lo < 1) || ($hi > 65535) || ($lo >= $hi)) {
+		return null;
+	}
+
+	return array($lo, $hi);
+}
+
+/*
+ * Un puerto del rango que no sea el que ya esta puesto.
+ *
+ * Aleatorio y no secuencial a proposito: 20000, 20001, 20002 es un patron tan
+ * reconocible como el que la ofuscacion trata de esconder, y rotar hacia algo
+ * predecible no esconde nada. Descartar el actual evita el salto que no salta,
+ * que gasta un intervalo entero sin cambiar el flujo.
+ */
+function awg_porthop_pick($lo, $hi, $current = null) {
+	$port = random_int($lo, $hi);
+
+	// Con dos puertos o mas esto termina; el rango de un solo puerto lo
+	// rechaza la validacion justamente por esto.
+	if (!is_null($current) && ($port === (int) $current) && (($hi - $lo) >= 1)) {
+		$port = ($port < $hi) ? $port + 1 : $lo;
+	}
+
+	return $port;
+}
+
+/*
+ * Le cambia el puerto de destino a cada peer que rote y le toque.
+ *
+ * Se llama una vez por segundo desde el loop del servicio. El camino barato es
+ * el normal: recorre la configuracion y se va sin ejecutar nada si a nadie le
+ * toca todavia. Recien cuando hay al menos uno vencido consulta al backend.
+ *
+ * Los vencimientos viven en un static y no en un archivo porque el daemon es un
+ * proceso largo y no hay nada que preservar entre arranques: cualquier puerto
+ * del rango sirve igual que cualquier otro, asi que empezar de cero al arrancar
+ * no pierde nada.
+ */
+function awg_hop_ports() {
+	global $awgg;
+
+	// peer_idx => timestamp del proximo salto
+	static $next_hop = array();
+
+	$now = time();
+
+	$due = array();
+
+	foreach (config_get_path('installedpackages/amneziawg/peers/item', []) as $peer_idx => $peer) {
+		/*
+		 * Rotar exige saber a donde: sin endpoint el peer es roadwarrior y su
+		 * direccion la aprende el backend del handshake, no la elegimos aca.
+		 */
+		if (empty($peer['endpoint']) || is_null(awg_porthop_range($peer))) {
+			unset($next_hop[$peer_idx]);
+			continue;
+		}
+
+		$interval = awg_get_porthop_interval($peer);
+
+		// Un peer recien configurado salta en la proxima pasada, no ya mismo
+		if (!isset($next_hop[$peer_idx])) {
+			$next_hop[$peer_idx] = $now + $interval;
+			continue;
+		}
+
+		if ($next_hop[$peer_idx] <= $now) {
+			$due[$peer_idx] = $peer;
+			$next_hop[$peer_idx] = $now + $interval;
+		}
+	}
+
+	if (empty($due)) {
+		return;
+	}
+
+	// Una consulta por tunel y no por peer, igual que awg_resolve_endpoints()
+	$endpoints = $running = array();
+
+	foreach ($due as $peer_idx => $peer) {
+		$tun = $peer['tun'];
+
+		if (!array_key_exists($tun, $endpoints)) {
+			$endpoints[$tun] = awg_tunnel_get_peers_endpoints($tun);
+			$running[$tun] = awg_tunnel_get_peers_running_keys($tun);
+		}
+
+		if (!in_array($peer['publickey'], $running[$tun])) {
+			continue;
+		}
+
+		$live = $endpoints[$tun][$peer['publickey']] ?? '';
+
+		if (empty($live)) {
+			continue;
+		}
+
+		[$host, $current_port] = awg_endpoint_split($live);
+
+		if ($host === '') {
+			continue;
+		}
+
+		[$lo, $hi] = awg_porthop_range($peer);
+
+		$port = awg_porthop_pick($lo, $hi, $current_port);
+
+		awg_peer_set_endpoint($tun, $peer['publickey'], "{$host}:{$port}");
+	}
+}
+
+/*
+ * Parte un endpoint en host y puerto.
+ *
+ * El IPv6 literal es la razon de que esto no sea un explode(':'): "[2001:db8::1]:51820"
+ * tiene siete dos puntos y solo el ultimo separa el puerto.
+ */
+function awg_endpoint_split($endpoint) {
+	$endpoint = trim($endpoint);
+
+	if (preg_match('/^\[(.+)\]:(\d{1,5})$/', $endpoint, $m)) {
+		return array("[{$m[1]}]", (int) $m[2]);
+	}
+
+	$pos = strrpos($endpoint, ':');
+
+	if (($pos === false) || (substr_count($endpoint, ':') > 1)) {
+		return array('', 0);
+	}
+
+	return array(substr($endpoint, 0, $pos), (int) substr($endpoint, $pos + 1));
+}
+
+/*
+ * El intervalo de rotacion de un peer, acotado a lo que la validacion permite.
+ *
+ * El techo se aplica aca ademas de en la validacion porque un valor puede venir
+ * de una configuracion importada de otro firewall, que la validacion de esta
+ * pantalla no vio pasar.
+ */
+function awg_get_porthop_interval($peer) {
+	global $awgg;
+
+	$interval = $peer['porthop_interval'] ?? '';
+
+	if (!is_numericint($interval)) {
+		return $awgg['default_porthop_interval'];
+	}
+
+	return max($awgg['porthop_interval_min'],
+		   min($awgg['porthop_interval_max'], (int) $interval));
+}
+
 function awg_should_reresolve_endpoints($last_update_time) {
 	global $awgg;
 
@@ -734,6 +906,8 @@ function awg_do_peer_post($post) {
 	$pconfig['endpoint'] 		= $post['endpoint'];
 	$pconfig['port'] 		= empty($post['port']) ? $awgg['default_port'] : $post['port'];
 	$pconfig['gateway']		= $post['gateway'] ?? '';
+	$pconfig['porthop']		= trim($post['porthop'] ?? '');
+	$pconfig['porthop_interval']	= trim($post['porthop_interval'] ?? '');
 	$pconfig['persistentkeepalive']	= $post['persistentkeepalive'];
 	$pconfig['publickey'] 		= $post['publickey'];
 	$pconfig['presharedkey']	= $post['presharedkey'];
@@ -741,8 +915,13 @@ function awg_do_peer_post($post) {
 
 	// Looks like we have a dynamic endpoint, so clear endpoint or port variables before saving
 	if (isset($post['dynamic']) && $post['dynamic'] == 'yes') {
-		// El gateway se va con ellos: sin endpoint no hay ruta que armar
-		unset($pconfig['endpoint'], $pconfig['port'], $pconfig['gateway']);
+		/*
+		 * El gateway se va con ellos: sin endpoint no hay ruta que armar. Y la
+		 * rotacion tampoco sobrevive, por lo mismo: a un peer que disca hacia
+		 * aca no le elegimos el puerto, se lo aprendemos del handshake.
+		 */
+		unset($pconfig['endpoint'], $pconfig['port'], $pconfig['gateway'],
+		      $pconfig['porthop'], $pconfig['porthop_interval']);
 	}
 
 	$input_errors = awg_validate_peer_post($pconfig, $peer_idx);
@@ -855,6 +1034,22 @@ function awg_apply_list_get($list, $delete_after_get = true) {
 	return $toapplylist;
 }
 
+/*
+ * Vacia una lista de pendientes.
+ *
+ * awg_apply_list_get() la consume al leerla, que servia mientras leer y aplicar
+ * eran lo mismo. Desde que se puede leer sin aplicar --para poder informar que
+ * el servicio esta parado sin perder lo que faltaba aplicar-- hace falta poder
+ * vaciarla por separado, y recien cuando de verdad se aplico.
+ */
+function awg_apply_list_clear($list) {
+	global $awgg;
+
+	if (isset($awgg['applylist'][$list])) {
+		unlink_if_exists($awgg['applylist'][$list]);
+	}
+}
+
 function awg_apply_list_add($list, $entries) {
 	global $awgg;
 
@@ -927,8 +1122,18 @@ function awg_tunnel_sync($tunnel_names, $restart_services = false, $resolve_endp
 	    || (count($tunnel_names) === 0))
 		    $tunnel_names = awg_get_configured_ifs();
 
-	// This is only necessary if the service is running
-	if (awg_is_service_running()) {
+	/*
+	 * Sin servicio no hay nada que sincronizar: los tuneles son procesos y el
+	 * demonio es quien los levanta.
+	 *
+	 * Lo que cambio es que ANTES esto se iba en silencio devolviendo 0. Aplicar
+	 * con el servicio parado no aplicaba nada, las pantallas leian ret_code 0,
+	 * limpiaban el cartel de cambios pendientes y el operador se quedaba
+	 * creyendo que habia aplicado. Ahora se dice.
+	 */
+	if (!awg_is_service_running()) {
+		$ret_code |= AWG_ERROR_SVC_NOT_RUNNING;
+	} else {
 		// Sync each tunnel
 		foreach ((array) $tunnel_names as $tunnel_name) {
 			// Attempt to sync the tunnel
@@ -1065,6 +1270,25 @@ function awg_resync() {
 
 	// Update globals
 	awg_globals();
+
+	/*
+	 * La misma guarda que awg_install(), y hace falta APARTE.
+	 *
+	 * pfSense llama a los dos hooks por separado --custom_php_install_command y
+	 * custom_php_resync_config_command-- asi que negarse en el primero no
+	 * impide nada: el segundo instala earlyshellcmd, grupo de interfaces y ACL
+	 * de Unbound por su cuenta. Su unica condicion era $g['amneziawg_installing'],
+	 * que justamente no se llega a poner cuando la instalacion se rechaza.
+	 *
+	 * Eso no es teorico: rechazar solo en awg_install() dejaba 'service
+	 * amneziawgd start' en el arranque de un firewall donde el paquete se
+	 * habia negado a instalarse.
+	 */
+	if (!awg_platform_supported() && !awg_platform_forced()) {
+		unset($g['amneziawg_installing']);
+
+		return;
+	}
 
 	// Create AmneziaWG configuration files
 	awg_create_config_files();

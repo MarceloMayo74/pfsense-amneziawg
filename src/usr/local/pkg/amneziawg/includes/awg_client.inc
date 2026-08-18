@@ -1297,6 +1297,8 @@ function awg_client_do_peer_post($post) {
 	$pconfig['endpoint']		= trim((string) ($post['endpoint'] ?? ''));
 	$pconfig['port']		= trim((string) ($post['port'] ?? ''));
 	$pconfig['gateway']		= trim((string) ($post['gateway'] ?? ''));
+	$pconfig['porthop']		= trim((string) ($post['porthop'] ?? ''));
+	$pconfig['porthop_interval']	= trim((string) ($post['porthop_interval'] ?? ''));
 	$pconfig['persistentkeepalive']	= trim((string) ($post['persistentkeepalive'] ?? ''));
 
 	$genera = ($pconfig['client_enable'] == 'yes');
@@ -1461,6 +1463,17 @@ function awg_client_do_peer_post($post) {
 			$pconfig['gateway']);
 	}
 
+	/*
+	 * La rotacion de puertos se valida SOLO sin generar, por lo mismo que el
+	 * gateway se descarta: generando, el peer es roadwarrior y no disca a
+	 * ningun lado, asi que el rango se tira en silencio y no es un error del
+	 * operador. Sin generar si lo es, y awg_validate_porthop() ya distingue el
+	 * caso de no tener endpoint del de tener un rango mal escrito.
+	 */
+	if (!$genera) {
+		$input_errors = array_merge($input_errors, awg_validate_porthop($pconfig));
+	}
+
 	if (!empty($pconfig['persistentkeepalive'])) {
 		if (!is_numericint($pconfig['persistentkeepalive'])) {
 			$input_errors[] = sprintf(gettext('Invalid keep alive interval (%s).'),
@@ -1523,6 +1536,10 @@ function awg_client_do_peer_post($post) {
 		 * WAN y no disca a ningun lado.
 		 */
 		'gateway'		=> $manual_endpoint ? $pconfig['gateway'] : '',
+
+		// Idem: sin endpoint no hay puerto de destino que rotar
+		'porthop'		=> $manual_endpoint ? $pconfig['porthop'] : '',
+		'porthop_interval'	=> $manual_endpoint ? $pconfig['porthop_interval'] : '',
 		'persistentkeepalive'	=> $genera ? null : $pconfig['persistentkeepalive'],
 		'publickey'		=> $pconfig['publickey'],
 		'presharedkey'		=> empty($pconfig['presharedkey']) ? null : $pconfig['presharedkey']);
@@ -1618,13 +1635,18 @@ function awg_client_apply_changes() {
 	$ret_code = 0;
 
 	if (is_subsystem_dirty($awgg['subsystems']['awg'])) {
-		if (awg_is_service_running()) {
-			$sync_status = awg_tunnel_sync(awg_apply_list_get('tunnels'), true, true);
+		/*
+		 * Igual que en las pantallas: el chequeo de servicio corriendo lo hace
+		 * awg_tunnel_sync(), y la lista se lee sin consumirla para que un
+		 * fallo no se lleve lo que quedaba pendiente.
+		 */
+		$sync_status = awg_tunnel_sync(awg_apply_list_get('tunnels', false), true, true);
 
-			$ret_code |= $sync_status['ret_code'];
-		}
+		$ret_code |= $sync_status['ret_code'];
 
 		if ($ret_code == 0) {
+			awg_apply_list_clear('tunnels');
+
 			clear_subsystem_dirty($awgg['subsystems']['awg']);
 		}
 	}

@@ -1952,6 +1952,118 @@ function awg_tunnel_get_peers_running_keys($tunnel_name) {
 }
 
 /*
+ * Los endpoints que el backend tiene puestos AHORA, por clave publica.
+ *
+ * La rotacion de puertos necesita esto y no la configuracion: el host del
+ * endpoint puede ser un nombre que awg_resolve_endpoints() ya resolvio a UNA
+ * direccion, y esa misma es la que tiene la ruta de host del gateway. Si la
+ * rotacion volviera a leer el nombre y lo resolviera por su cuenta, un nombre
+ * con varias A devolveria otra IP y el tunel terminaria hablando con un
+ * servidor mientras la ruta apunta a otro, sin que nada lo diga.
+ *
+ * Leyendo del backend se rota el puerto y NADA mas, que es todo lo que la
+ * rotacion tiene que hacer.
+ */
+/*
+ * Que firewall es este: etiqueta, version y __FreeBSD_version.
+ *
+ * La etiqueta importa porque en Plus $g['product_label'] dice "pfSense Plus"
+ * mientras product_name sigue diciendo "pfSense", y un mensaje que confunde CE
+ * con Plus manda a la persona a buscar el problema donde no esta.
+ */
+function awg_platform() {
+	global $g;
+
+	return array(
+		'label'		=> $g['product_label'] ?? ($g['product_name'] ?? 'pfSense'),
+		'version'	=> (string) ($g['product_version'] ?? ''),
+		'freebsd'	=> trim((string) php_uname('r')),
+		'osreldate'	=> (int) get_single_sysctl('kern.osreldate'));
+}
+
+/*
+ * Si esta version es una de las probadas.
+ *
+ * Prefijo y no igualdad: 2.9.0-BETA, 2.9.0 y 2.9.0-p1 son la misma version
+ * probada, y enumerar cada parche seria una lista que envejece sola.
+ */
+function awg_platform_supported() {
+	global $awgg;
+
+	$version = awg_platform()['version'];
+
+	if ($version === '') {
+		// Sin poder saber que version es, no se afirma que este probada
+		return false;
+	}
+
+	foreach ((array) $awgg['supported_versions'] as $prefix) {
+		if (strncmp($version, $prefix, strlen($prefix)) === 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// Si alguien creo a mano el archivo que saltea la guarda
+function awg_platform_forced() {
+	global $awgg;
+
+	return file_exists($awgg['force_install_flag']);
+}
+
+/*
+ * El texto de la negativa. Dice QUE encontro y QUE esperaba, porque un "no
+ * soportado" a secas manda a adivinar.
+ */
+function awg_platform_refusal_text() {
+	global $awgg;
+
+	$p = awg_platform();
+
+	$esperadas = implode(', ', array_map(fn($v) => "{$v}x", (array) $awgg['supported_versions']));
+
+	return sprintf(
+		gettext("AmneziaWG is not installed: this is %1\$s %2\$s (FreeBSD %3\$s), and this package is only tested on %4\$s.\n" .
+			"\n" .
+			"The package ABI is FreeBSD:16:amd64, which several pfSense Plus releases also match, so pkg(8) accepts it here " .
+			"without warning. It is not a safe install: nothing has been wired into this firewall's boot.\n" .
+			"\n" .
+			"To install anyway, at your own risk, create %5\$s from the shell and install again.\n"),
+		$p['label'], $p['version'], $p['freebsd'], $esperadas, $awgg['force_install_flag']);
+}
+
+function awg_tunnel_get_peers_endpoints($tunnel_name) {
+	global $awgg;
+
+	$s = fn($x) => $x;
+
+	$output = $res = array();
+
+	$cmd = "{$awgg['awg']} show {$s(escapeshellarg($tunnel_name))} endpoints 2>&1";
+
+	exec($cmd, $output, $ret_code);
+
+	if ($ret_code <> 0) {
+		return $res;
+	}
+
+	foreach ($output as $row) {
+		$cols = explode("	", $row);
+
+		// Un peer sin endpoint imprime "(none)", que no es un endpoint
+		if ((count($cols) < 2) || ($cols[1] === '(none)') || empty($cols[1])) {
+			continue;
+		}
+
+		$res[$cols[0]] = $cols[1];
+	}
+
+	return $res;
+}
+
+/*
  * This returns an array of peer keys for a given tunnel
  * 
  * These are actually *configured* and bound to a tunnel

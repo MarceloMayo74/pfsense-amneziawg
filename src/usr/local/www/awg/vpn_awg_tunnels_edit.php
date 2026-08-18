@@ -55,14 +55,28 @@ if ($_POST) {
 		$ret_code = 0;
 
 		if (is_subsystem_dirty($awgg['subsystems']['awg'])) {
-			if (awg_is_service_running()) {
-				$tunnels_to_apply = awg_apply_list_get('tunnels');
-				$sync_status = awg_tunnel_sync($tunnels_to_apply, true, true);
-				$ret_code |= $sync_status['ret_code'];
-			}
+			/*
+			 * Sin el chequeo de "servicio corriendo" a proposito: lo hace
+			 * awg_tunnel_sync(), que ahora devuelve error en vez de exito mudo.
+			 * Cuando el chequeo estaba aca, con el servicio parado no se
+			 * aplicaba nada, $ret_code quedaba en 0, se limpiaba el cartel de
+			 * cambios pendientes y la pantalla decia que habia aplicado.
+			 *
+			 * Y la lista se lee SIN consumirla: si no se pudo aplicar, lo que
+			 * quedaba pendiente tiene que seguir pendiente. Se vacia recien
+			 * cuando se aplico de verdad.
+			 */
+			$tunnels_to_apply = awg_apply_list_get('tunnels', false);
+			$sync_status = awg_tunnel_sync($tunnels_to_apply, true, true);
+			$ret_code |= $sync_status['ret_code'];
 
 			if ($ret_code == 0) {
+				awg_apply_list_clear('tunnels');
+
 				clear_subsystem_dirty($awgg['subsystems']['awg']);
+			} else {
+				$input_errors = array_merge((array) ($input_errors ?? array()),
+							    array_values(awg_get_errors('service', $ret_code)));
 			}
 		}
 	}

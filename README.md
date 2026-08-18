@@ -9,10 +9,17 @@ forma de los paquetes en el cable, para que un DPI no pueda reconocerlos por
 firma.
 
 > **Probado sólo en pfSense CE 2.9.0-BETA (FreeBSD 16), amd64**, sobre dos
-> firewalls, uno contra el otro. En 2.8.1 (FreeBSD 15)
-> no se probó y no se publica un `.pkg`: el que hay declara el ABI
-> `FreeBSD:16:amd64`, así que `pkg add` lo rechaza ahí en vez de instalar algo
-> que nadie verificó. El detalle de por qué, en [Objetivo](#objetivo).
+> firewalls, uno contra el otro. En 2.8.1 y 2.7.x —FreeBSD 15 y 14— el ABI
+> `FreeBSD:16:amd64` que declara el `.pkg` hace que `pkg add` lo rechace, así
+> que ahí no hay nada que hacer.
+>
+> **Pero el ABI no alcanza como garantía**, y conviene decirlo claro: FreeBSD 16
+> no es sólo 2.9.0. También lo corren pfSense Plus 25.11, 25.11.1, 26.03,
+> 26.03.1, 26.07 y 26.10, y en todas ellas `pkg add` acepta este paquete **sin
+> una sola advertencia**. Por eso el paquete trae su propia guarda: en una
+> versión que no está en la lista de probadas, el instalador **se niega** antes
+> de tocar nada, y el servicio se niega a arrancar. Se puede forzar creando
+> `/root/.amneziawg-force-install` a mano. El detalle, en [Objetivo](#objetivo).
 
 > **Estado: AmneziaWG 3.1.** El paquete instala, tiene los **25** campos de
 > ofuscación —los 16 de 2.0 más los nueve que estrenaron 3.0 y 3.1—, levanta y
@@ -348,10 +355,59 @@ Verificado con 77 tests locales y 9 contra un daemon vivo en el firewall
 plantillas sorteadas, y —la propiedad que importa— que nuestro validador
 **nunca apruebe algo que el backend rechace**.
 
+### Rotación de puertos
+
+La ofuscación disfraza el **contenido** de los paquetes. No disfraza que una
+máquina sostenga una conversación UDP con la misma IP y el mismo puerto durante
+horas, y ese patrón se reconoce sin leer nada. Algunos ISP lo estrangulan: la
+documentación de Hysteria lo dice de frente —*"users in China often report that
+their ISPs block/restrict persistent UDP connections to a single port"*— y por
+eso su cliente salta de puerto cada 10 segundos.
+
+Son **dos capas distintas**, y hasta ahora este paquete sólo cubría la primera.
+
+El peer que disca puede ahora rotar el puerto de destino dentro de un rango.
+Cada tramo le parece un flujo nuevo a quien esté mirando la conexión. Por debajo
+es una sola cosa: `awg set <túnel> peer <clave> endpoint <host>:<puerto>` cada N
+segundos, con el reloj propio del demonio —separado del de DNS, porque saltar
+cada 10 segundos no es motivo para consultar DNS cada 10 segundos.
+
+**Rota sólo el puerto de destino, y eso es deliberado.** El de origen queda fijo,
+así que el otro extremo sigue viendo al peer llegar del mismo lugar de siempre y
+**nunca dispara su roaming** —que si se disparara, devolvería el endpoint al
+puerto anterior y desharía la rotación. Rotar también el origen obligaría a
+rebindear el socket, que es justo el que lleva el parche de sticky sockets.
+
+El otro extremo **no necesita este paquete ni saber que estamos rotando**: le
+alcanza una regla de NAT que mande el rango a su puerto de escucha. Es el mismo
+truco que Hysteria documenta para su propio servidor. Conviene hacerla desde la
+GUI y no a mano: la regla generada lleva `reply-to`, y sin eso un firewall
+multi-WAN contesta por la interfaz equivocada y el túnel se muere sin decir nada
+—medido, no supuesto.
+
+Lo que está probado es que **rota sin costar un paquete**: entre dos firewalls
+por internet, con AmneziaWG 3.1 y `S4` puesto, 8 saltos en 75 segundos con 75 de
+75 paquetes y sin un solo rehandshake. Y a 2 segundos también.
+
+Lo que **no** está probado —y no lo podemos probar desde acá— es que sirva contra
+un censor concreto. Rotar y que eso destrabe un bloqueo son dos afirmaciones
+distintas, y sólo la primera está medida. El detalle en
+[docs/port-hopping.md](docs/port-hopping.md).
+
 ### Próximo paso concreto
 
-Publicar. Falta elegir el número de versión del primer release y adjuntarle la
-fuente del `awg` (ver [docs/licencias.md](docs/licencias.md)).
+Publicado, con las
+[releases en GitHub](https://github.com/MarceloMayo74/pfsense-amneziawg/releases)
+y la fuente del `awg` adjunta (ver [docs/licencias.md](docs/licencias.md)).
+
+Lo que sigue no depende de escribir código sino de que alguien lo use:
+
+- **Si la rotación de puertos sirve.** Que rota sin costar un paquete está
+  medido; que destrabe un bloqueo sólo lo puede decir alguien que esté detrás de
+  uno. Ver [docs/port-hopping.md](docs/port-hopping.md).
+- **El importador parcial de parámetros.** Pedido en el foro, pero "importar
+  algunos parámetros" admite al menos tres lecturas distintas y construir la
+  equivocada es tirar el trabajo. Falta que quien lo pidió elija cuál.
 
 ## Por dónde empezar
 
@@ -445,6 +501,33 @@ pkg add /root/pfSense-pkg-AmneziaWG-1.2.0-FreeBSD-16-amd64.pkg
 2.8.1 (FreeBSD 15) queda fuera a propósito. Sostener un ABI que no se puede
 probar es peor que no sostenerlo: se publica algo que nadie verificó. Todo lo de
 este paquete está medido sobre una 2.9.0, y 2.8.1 es la versión que se va.
+
+### La guarda de versión, y por qué hace falta
+
+El ABI del `.pkg` **no** es un control de versión de pfSense. `FreeBSD:16:amd64`
+lo cumple 2.9.0 CE y lo cumplen seis releases de pfSense Plus. `pkg add` las
+acepta a todas, en silencio, y el paquete se cablea al arranque del firewall
+—`earlyshellcmd`, grupo de interfaces, ACL de Unbound, cron del watchdog— de un
+sistema que nadie probó. El primer síntoma, si llega, llega después y lejos.
+
+Por eso la lista de versiones probadas vive en el paquete, en
+`supported_versions` de `awg_globals.inc`, y se comparan como prefijo:
+
+| Dónde | Qué hace |
+|---|---|
+| `awg_install()` | se niega **antes** de escribir en `config.xml`; los archivos quedan en disco pero inertes, y `pkg delete` no deja rastro |
+| `awg_service_cli_start()` | se niega a arrancar, y lo dice en el log del sistema |
+
+La salida de emergencia es un archivo que hay que crear a mano desde la shell:
+
+```
+touch /root/.amneziawg-force-install
+```
+
+El que llega ahí sabe lo que hace. Nadie llega por accidente.
+
+**Agregar una versión a la lista es decir "la probé".** No se agrega por
+parecido, aunque el commit de FreeBSD sea el mismo.
 
 ## Relación con wgeasy
 

@@ -226,6 +226,10 @@ if (!$_POST || ($act == 'email')) {
 
 		// Del peer y nunca del store: es ruteo de este firewall, no del cliente
 		$pconfig['gateway']		= $peer['gateway'] ?? '';
+
+		// Idem: la rotacion la hace ESTE firewall al discar, no el cliente
+		$pconfig['porthop']		= $peer['porthop'] ?? '';
+		$pconfig['porthop_interval']	= $peer['porthop_interval'] ?? '';
 		$pconfig['persistentkeepalive']	= $store['persistentkeepalive'] ?? $peer['persistentkeepalive'];
 	} else {
 		/*
@@ -256,6 +260,8 @@ if (!$_POST || ($act == 'email')) {
 		$pconfig['endpoint']		= (string) $defaults['endpoint'];
 		$pconfig['port']		= (string) $defaults['port'];
 		$pconfig['gateway']		= '';
+		$pconfig['porthop']		= '';
+		$pconfig['porthop_interval']	= '';
 		$pconfig['persistentkeepalive']	= (string) $defaults['persistentkeepalive'];
 	}
 
@@ -449,6 +455,56 @@ $section->addInput(new Form_Select(
 	    'address takes the chosen gateway, not only the tunnel. The route is removed when the peer, its gateway or the ' .
 	    'AmneziaWG service goes away, and an address that already has a host route from elsewhere is left alone. ' .
 	    '(<a href="/system_gateways.php">' . gettext('Gateways') . '</a>)');
+
+/*
+ * Rotacion del puerto de destino ("port hopping").
+ *
+ * Que hace: cada N segundos le cambia el puerto al endpoint, con
+ * "awg set <tunel> peer <clave> endpoint <host>:<puerto>". Nada mas. La sesion
+ * criptografica no se toca y no hay rehandshake: medido entre dos firewalls por
+ * internet, a 10 y a 2 segundos, cruzaron 187 de 187 paquetes.
+ *
+ * Por que sirve: la ofuscacion disimula el CONTENIDO de los paquetes, pero un
+ * flujo UDP sostenido hacia un mismo puerto durante horas es un patron
+ * reconocible por si solo, sin leer nada. Algunos ISP lo estrangulan. Rotar el
+ * destino hace que cada tramo parezca un flujo nuevo.
+ *
+ * Por que solo el destino: el puerto de ORIGEN queda fijo a proposito. Gracias
+ * a eso el otro extremo sigue viendo al peer llegar del mismo lugar de siempre
+ * y no dispara su roaming -- que si se disparara, devolveria el endpoint al
+ * puerto anterior y desharia la rotacion. Rotar tambien el origen obligaria a
+ * rebindear el socket, que es justo el que lleva el parche de sticky sockets.
+ */
+$section->addInput(new Form_Input(
+	'porthop',
+	'Port Hopping',
+	'text',
+	$pconfig['porthop'],
+	['placeholder' => '20000-20100']
+))->addClass('trim')
+  ->setHelp('Rotate the destination port within this range, written as <b>low-high</b>. Leave empty to keep the fixed ' .
+	    'Endpoint Port above, which is the normal case. Only applies while an endpoint is set.<br />' .
+	    '<span class="text-danger">' . gettext('The far side must accept the whole range.') . '</span> ' .
+	    'On the peer firewall, create a port forward sending <b>UDP</b> on this range to the tunnel listen port ' .
+	    '(<a href="/firewall_nat.php">' . gettext('NAT') . '</a>). Do it from the GUI rather than by hand: the ' .
+	    'generated rule carries <tt>reply-to</tt>, without which a multi-WAN firewall answers out of the wrong ' .
+	    'interface and the tunnel dies silently.<br />' .
+	    '<b>' . gettext('What is measured and what is not.') . '</b> ' .
+	    'Rotating costs nothing: between two firewalls over the internet, at 3.1 with padding on every packet, ' .
+	    'it hopped without losing a single packet and without an extra handshake, at intervals from 2 to 10 seconds. ' .
+	    'Whether it defeats a particular censor is <b>not</b> measured and cannot be measured from here. ' .
+	    'Rotating and getting past a block are two different claims, and only the first one has been tested.');
+
+$section->addInput(new Form_Input(
+	'porthop_interval',
+	'Hop Interval',
+	'text',
+	$pconfig['porthop_interval'],
+	['placeholder' => $awgg['default_porthop_interval']]
+))->addClass('trim')
+  ->setHelp(sprintf(gettext('Seconds between hops, %1$d to %2$d. Empty means %3$d. Only applies when a port hopping ' .
+			    'range is set above.'),
+		    $awgg['porthop_interval_min'], $awgg['porthop_interval_max'], $awgg['default_porthop_interval']));
 
 $section->addInput(new Form_Input(
 	'persistentkeepalive',
@@ -1027,6 +1083,8 @@ events.push(function() {
 		 * aca la fila es del campo solo, que es justo lo que hideInput() toma.
 		 */
 		hideInput('gateway', generating);
+		hideInput('porthop', generating);
+		hideInput('porthop_interval', generating);
 
 		$('#publickey').prop('readonly', generating);
 

@@ -216,6 +216,29 @@ function awg_service_cli_start($serialize = true) {
 		return $ret_code;
 	}
 
+	/*
+	 * La segunda guarda de plataforma. La primera vive en awg_install() y evita
+	 * que el paquete se cablee; esta evita que arranque igual si alguien lo
+	 * cableo por otro camino -- una configuracion restaurada de otro firewall,
+	 * un earlyshellcmd sobreviviente, un install forzado y despues revertido.
+	 *
+	 * Va despues del chequeo de habilitado y antes de cualquier otra cosa: un
+	 * paquete que no deberia estar aca no levanta tuneles ni toca interfaces.
+	 */
+	if (!awg_platform_supported() && !awg_platform_forced()) {
+		$p = awg_platform();
+
+		log_error("AmneziaWG: refusing to start on {$p['label']} {$p['version']} (FreeBSD {$p['freebsd']}); " .
+			  "this package is only tested on the versions listed in supported_versions. " .
+			  "Create {$awgg['force_install_flag']} to override.");
+
+		$ret_code |= AWG_ERROR_SVC_START;
+
+		awg_service_parse_errors($ret_code, $serialize);
+
+		return $ret_code;
+	}
+
 	if (awg_is_service_running()) {
 		$ret_code |= AWG_ERROR_SVC_RUNNING;
 
@@ -392,6 +415,14 @@ function awg_service_daemon() {
 			// Reresolve endpoint hostnames again
 			$last_update_time = awg_resolve_endpoints();
 		}
+
+		/*
+		 * La rotacion de puertos lleva su propio reloj adentro y se la llama
+		 * una vez por segundo. No cuelga del intervalo de arriba a proposito:
+		 * ese resuelve DNS, y saltar cada 10 segundos no es motivo para
+		 * consultar DNS cada 10 segundos.
+		 */
+		awg_hop_ports();
 
 		// Wait a bit before trying again
 		sleep(1);

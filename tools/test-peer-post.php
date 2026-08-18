@@ -46,7 +46,12 @@ if (!function_exists('gettext')) {
 
 define('AWG_DNS_NONE', '__none__');
 
-$awgg = array('default_port' => 51820);
+$awgg = array(
+	'default_port'			=> 51820,
+	'default_porthop_interval'	=> 10,
+	'porthop_interval_min'		=> 2,
+	'porthop_interval_max'		=> 300,
+	'porthop_range_min_ports'	=> 2);
 
 /*
  * El entorno de pfSense, reducido a lo que toca esta funcion. Las validaciones
@@ -179,6 +184,10 @@ $GLOBALS['tunnel'] = array(
 
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_gen_sender_obfuscation'));
 eval(extract_function("{$src}/awg_client.inc", 'awg_client_do_peer_post'));
+
+// La validacion del port hopping vive en awg_validate.inc y awg_client_do_peer_post()
+// la llama: en runtime llega por awg.inc, que la requiere; aca hay que traerla.
+eval(extract_function("{$src}/awg_validate.inc", 'awg_validate_porthop'));
 
 $pass = $fail = 0;
 
@@ -388,6 +397,104 @@ $res = correr(post_base(array(
 
 check('un gateway que no existe se rechaza', !empty($res['input_errors']));
 check('y el error lo nombra', (bool) preg_grep('/WAN9_QUE_NO_EXISTE/', $res['input_errors']),
+      implode(' | ', $res['input_errors']));
+
+echo "\n=== la rotacion de puertos, que tambien solo existe discando ===\n";
+
+$res = correr(post_base(array(
+	'publickey'		=> $clave_pub,
+	'endpoint'		=> 'vpn.proveedor.com',
+	'port'			=> '51820',
+	'porthop'		=> '20000-20100',
+	'porthop_interval'	=> '10')));
+
+check('se guarda sin errores', empty($res['input_errors']), implode(' | ', $res['input_errors']));
+check('el rango llega al peer',
+      ($GLOBALS['peer_post_visto']['porthop'] ?? null) === '20000-20100',
+      var_export($GLOBALS['peer_post_visto']['porthop'] ?? null, true));
+check('el intervalo llega al peer',
+      ($GLOBALS['peer_post_visto']['porthop_interval'] ?? null) === '10',
+      var_export($GLOBALS['peer_post_visto']['porthop_interval'] ?? null, true));
+
+// Sin endpoint no hay a donde saltar: se rechaza en vez de guardarse mudo
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> '',
+	'port'		=> '',
+	'porthop'	=> '20000-20100')));
+
+check('sin endpoint el rango se rechaza', !empty($res['input_errors']));
+check('y el error explica por que',
+      (bool) preg_grep('/needs an endpoint/', $res['input_errors']),
+      implode(' | ', $res['input_errors']));
+
+// Generando cliente el peer es roadwarrior: no disca, no rota
+$res = correr(post_base(array(
+	'client_enable'		=> 'yes',
+	'privatekey'		=> $clave_priv,
+	'endpoint'		=> 'mifirewall.dyndns.org',
+	'port'			=> '51820',
+	'client_allowedips'	=> '0.0.0.0/0',
+	'porthop'		=> '20000-20100')));
+
+check('generando cliente tampoco se guarda rango',
+      empty($GLOBALS['peer_post_visto']['porthop']),
+      var_export($GLOBALS['peer_post_visto']['porthop'] ?? null, true));
+
+// Un rango de un solo puerto pasa la sintaxis y no rota nada: se rechaza
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> 'vpn.proveedor.com',
+	'port'		=> '51820',
+	'porthop'	=> '20000-20000')));
+
+check('un rango de un solo puerto se rechaza', !empty($res['input_errors']),
+      implode(' | ', $res['input_errors']));
+
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> 'vpn.proveedor.com',
+	'port'		=> '51820',
+	'porthop'	=> '20100-20000')));
+
+check('un rango invertido se rechaza', !empty($res['input_errors']));
+
+$res = correr(post_base(array(
+	'publickey'	=> $clave_pub,
+	'endpoint'	=> 'vpn.proveedor.com',
+	'port'		=> '51820',
+	'porthop'	=> '20000')));
+
+check('un rango sin guion se rechaza', !empty($res['input_errors']));
+
+$res = correr(post_base(array(
+	'publickey'		=> $clave_pub,
+	'endpoint'		=> 'vpn.proveedor.com',
+	'port'			=> '51820',
+	'porthop'		=> '20000-20100',
+	'porthop_interval'	=> '1')));
+
+check('un intervalo por debajo del minimo se rechaza', !empty($res['input_errors']),
+      implode(' | ', $res['input_errors']));
+
+$res = correr(post_base(array(
+	'publickey'		=> $clave_pub,
+	'endpoint'		=> 'vpn.proveedor.com',
+	'port'			=> '51820',
+	'porthop'		=> '20000-20100',
+	'porthop_interval'	=> '999')));
+
+check('un intervalo por encima del maximo se rechaza', !empty($res['input_errors']));
+
+// Sin rango, el intervalo no significa nada y no molesta
+$res = correr(post_base(array(
+	'publickey'		=> $clave_pub,
+	'endpoint'		=> 'vpn.proveedor.com',
+	'port'			=> '51820',
+	'porthop'		=> '',
+	'porthop_interval'	=> '999')));
+
+check('sin rango el intervalo se ignora', empty($res['input_errors']),
       implode(' | ', $res['input_errors']));
 
 echo "\n=== lo que se niega a guardar ===\n";
