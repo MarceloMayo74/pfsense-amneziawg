@@ -430,8 +430,8 @@ $section->add($group);
  * Por que gateway sale el trafico HACIA este peer.
  *
  * Solo tiene sentido discando: sin endpoint no hay a donde ir, y generando un
- * cliente el peer es roadwarrior por definicion. De ahi el 'manualonly', que es
- * el inverso de 'clientonly'.
+ * cliente el peer es roadwarrior por definicion. Por eso updateClientMode() lo
+ * esconde al reves que todo lo demas de esta pagina.
  *
  * Lo que hace por debajo es una ruta de host al endpoint, no un binding del
  * socket: FreeBSD no tiene SO_BINDTODEVICE, y forzar solo la direccion de
@@ -443,8 +443,7 @@ $section->addInput(new Form_Select(
 	'Gateway',
 	$pconfig['gateway'],
 	awg_gateway_list()
-))->addClass('manualonly')
-  ->setHelp('Which WAN this firewall uses to reach the peer, when the routing table would otherwise pick another one. ' .
+))->setHelp('Which WAN this firewall uses to reach the peer, when the routing table would otherwise pick another one. ' .
 	    'Only applies while an endpoint is set above.<br />' .
 	    '<span class="text-danger">Note: </span>this installs a host route to the endpoint address, so <b>all</b> traffic to that ' .
 	    'address takes the chosen gateway, not only the tunnel. The route is removed when the peer, its gateway or the ' .
@@ -1014,8 +1013,20 @@ events.push(function() {
 
 		hideClass('clientonly', !generating);
 
-		// El inverso: lo que solo sirve cuando este firewall es el que disca
-		hideClass('manualonly', generating);
+		/*
+		 * El Gateway al reves: solo sirve cuando este firewall es el que disca.
+		 *
+		 * Va por hideInput() y no por una clase. hideClass() esconde EL ELEMENTO
+		 * que lleva la clase, asi que ponersela al <select> dejaba su etiqueta y
+		 * su ayuda dibujadas al lado de un hueco. hideInput() sube dos niveles
+		 * --del select a su columna, y de ahi a la fila-- y esconde los tres.
+		 *
+		 * Es la misma trampa que arriba resuelve ->column->addClass() en el
+		 * desplegable de direcciones detectadas. Ahi hace falta la clase porque
+		 * el campo vive dentro de un Form_Group y comparte fila con otros dos;
+		 * aca la fila es del campo solo, que es justo lo que hideInput() toma.
+		 */
+		hideInput('gateway', generating);
 
 		$('#publickey').prop('readonly', generating);
 
