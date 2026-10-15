@@ -1075,6 +1075,8 @@ function awg_gen_headers($version = 1) {
 	$names = array('h1', 'h2', 'h3', 'h4');
 
 	$spec = $awgg['obfuscation_fields']['h1'];
+	// Conservar la politica de generacion; importar admite tambien 1-4.
+	$spec['min'] = max(5, $spec['min']);
 
 	if ($version < 2) {
 		$headers = array();

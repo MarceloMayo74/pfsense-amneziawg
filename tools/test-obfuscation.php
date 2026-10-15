@@ -163,11 +163,19 @@ echo "\n=== la trampa de H1-H4: son texto, no enteros ===\n";
 check('numero suelto vale',            n(array('h1' => '787134324')) === 0);
 check('RANGO con guion vale',          n(array('h1' => '787134324-1593815189')) === 0,
       json_encode(errs(array('h1' => '787134324-1593815189'))));
-check('por debajo de 5 se rechaza',    n(array('h1' => '3')) === 1);
-check('5 vale, es el borde',           n(array('h1' => '5')) === 0);
+foreach (array('h1', 'h2', 'h3', 'h4') as $header) {
+	check("{$header}=1 vale, es el borde", n(array($header => '1')) === 0);
+	check("{$header}=0 sigue rechazado", n(array($header => '0')) === 1);
+	check("{$header} negativo se rechaza", n(array($header => '-1')) >= 1);
+}
+check('1,2,3,4 distintos valen', n(array('h1' => '1', 'h2' => '2', 'h3' => '3', 'h4' => '4')) === 0);
+check('headers bajos iguales se rechazan', n(array('h1' => '1', 'h2' => '1')) === 1);
+check('rangos bajos solapados se rechazan', n(array('h1' => '1-3', 'h2' => '3-4')) === 1);
+check('5 sigue siendo valido',         n(array('h1' => '5')) === 0);
 check('4294967295 vale',               n(array('h1' => '4294967295')) === 0);
 check('mas que uint32 se rechaza',     n(array('h1' => '9999999999')) >= 1);
-check('rango que empieza abajo de 5 se rechaza', n(array('h1' => '2-900')) === 1);
+check('rango que empieza en 1 vale', n(array('h1' => '1-4')) === 0);
+check('rango que empieza en 0 sigue rechazado', n(array('h1' => '0-4')) === 1);
 check('rango al reves se rechaza',     n(array('h1' => '900-100')) >= 1);
 check('basura se rechaza',             n(array('h1' => '12,34')) === 1);
 check('decimal se rechaza',            n(array('h1' => '12.5')) === 1);
@@ -234,6 +242,12 @@ echo "\n=== la clave necesita lugar para su nonce ===\n";
 
 // La regla solo aplica al nivel al que la clave se escribe de verdad
 $test_ceiling = 4;
+
+check('perfil AWG 3.1 con headers 1-4 y proteccion de headers vale',
+      n(array_merge(k($clave_ok), array('awgversion' => '4',
+        'h1' => '1', 'h2' => '2', 'h3' => '3', 'h4' => '4',
+        's1' => '12', 's2' => '12', 's3' => '12', 's4' => '12',
+        'randomtrailers' => 'on', 'disablecookies' => 'on'))) === 0);
 
 check('sin S1-S4 la clave se rechaza',
       n(array('headerprotectionkey' => $clave_ok)) === 1,

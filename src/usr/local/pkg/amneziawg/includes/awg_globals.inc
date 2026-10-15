@@ -314,10 +314,12 @@ $awgg = array(
 		's2'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 1, 'scope' => 'shared'),
 		's3'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2, 'scope' => 'shared'),
 		's4'   => array('type' => 'int',  'min' => 0, 'max' => 1280, 'version' => 2, 'scope' => 'shared'),
-		'h1'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
-		'h2'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
-		'h3'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
-		'h4'   => array('type' => 'hdr',  'min' => 5, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		// Perfiles AWG 3.1 con HeaderProtectionKey pueden usar H1-H4 = 1,2,3,4.
+		// El minimo recomendado al generar no debe impedir importar esos valores.
+		'h1'   => array('type' => 'hdr',  'min' => 1, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h2'   => array('type' => 'hdr',  'min' => 1, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h3'   => array('type' => 'hdr',  'min' => 1, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
+		'h4'   => array('type' => 'hdr',  'min' => 1, 'max' => 4294967295, 'version' => 1, 'scope' => 'shared'),
 		'i1'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
 		'i2'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
 		'i3'   => array('type' => 'text', 'version' => 2, 'scope' => 'sender'),
